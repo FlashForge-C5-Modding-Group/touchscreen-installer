@@ -18,8 +18,60 @@ The flow is:
    `payload/installers/tunnel`, showing `STAGE` and `ERROR` output on screen.
 
 The completed installation writes `/usr/data/opencreator/install.json`, with
-installer version, mode, web UI, touchscreen choice, rootfs SHA-256, UTC time,
-and backup location.
+installer version, printer model and PID, mode, web UI, touchscreen choice,
+rootfs SHA-256, UTC time, and backup location.
+
+## Printer model detection
+
+The `check` step reads `MACHINE=` and `PID=` from the stock
+`/usr/prog/app_startup.sh` (falling back to
+`/usr/prog/PROGRAM/runFirmwareExe.sh`). Only these pairs are accepted:
+
+| Model         | MACHINE       | PID    |
+|---------------|---------------|--------|
+| Creator 5     | `Creator5`    | `0028` |
+| Creator 5 Pro | `Creator5Pro` | `0029` |
+
+The detected model is shown in the header and on the Ready page, and is passed
+to every payload script as `OC_MACHINE` and `OC_PID`. If neither pair is found,
+installation is refused. `OC_MACHINE`/`OC_PID` in the environment override
+detection; demo installs default to `Creator5Pro`.
+
+## Other features
+
+- **Preflight warnings**: `check` warns about less than 256 MB free on
+  `/usr/data` or the backup drive (`OC_MIN_FREE_KB` overrides the threshold),
+  a missing or read-only backup destination, and missing installer scripts.
+- **Progress bar and elapsed time** while installing or restoring.
+- **Log viewer**: the Log button (top right) shows all backend output. The
+  same output is appended, timestamped, to `BACKUP_DIR/opencreator-installer.log`
+  (or `/tmp/opencreator-installer.log` if that is not writable).
+- **Restore backup**: when a previous OpenCreator backup exists (the one in
+  `install.json`, otherwise the newest `BACKUP_DIR/opencreator-*`), the mode
+  page and the error page after a failed install offer to restore it. Folders
+  that did not exist at backup time (listed in `absent.list`) are removed.
+  MCU firmware is not rolled back.
+- **Reboot now** button once installation or restore completes.
+
+### Backend output protocol
+
+Lines written by `scripts/install.sh` and payload scripts:
+
+| Line                   | Effect                                     |
+|------------------------|--------------------------------------------|
+| `STAGE text`           | Status line                                |
+| `ERROR text`           | Status line in red                         |
+| `WARN text`            | Preflight warning on the mode page         |
+| `PROGRESS n total`     | Progress bar                               |
+| `MODEL machine pid`    | Detected printer model                     |
+| `BACKUP path`          | Enables Restore backup                     |
+| `STATE CURRENT/NEEDED` | Whether the rootfs update is needed        |
+
+## Logo
+
+`src/logo.c` is generated from `opencreator-oc-white.svg` by
+`scripts/gen-logo.py` (pure Python, no dependencies) as two 8-bit alpha
+images, tinted at runtime. Regenerate after changing the SVG with `make logo`.
 The rootfs checkpoint lives at `/usr/data/opencreator/rootfs.state`. It is
 considered current only when its digest matches and the vendor OTA version has
 reached the staged version.
@@ -45,10 +97,14 @@ always uses `scripts/demo.sh`, so it cannot invoke the real install backend.
 Set `OC_DEMO_ROOTFS=1` to also preview the rootfs/reboot page. Its countdown
 returns to the flow without rebooting the host.
 
-`make mips32` uses `mipsel-linux-gnu-gcc` for the printer's little-endian
-MIPS32r2 userland and links statically to avoid a host glibc mismatch. For
-the printer's exact sysroot, pass `CROSS_COMPILE` and `CFLAGS` from its
-Buildroot toolchain. The app is not yet claimed to be hardware-tested.
+`make mips32` uses the Ingenic xburst2 toolchain (r6.0.0, GCC 12.1, glibc
+2.33), the same one the stock kernel was built with. Extract
+`mips-xburst2-linux-toolchain-r6.0.0.tar.bz2` into
+`../ingenic-mips-toolchain-r6.0.0/`, or point `INGENIC_TOOLCHAIN` at the
+extracted `mips-xburst2-linux-toolchain-r6.0.0` directory. It builds with
+`-mnan=2008` (no legacy NaN, matching the stock userland) and links
+statically. `readelf -h` should list `nan2008, o32, mips32r2`. The app is
+not yet claimed to be hardware-tested.
 
 ## Payload layout
 
@@ -95,6 +151,8 @@ install backend can be tested without the UI using:
 ```sh
 /bin/sh scripts/install.sh check - payload-template /tmp/backups soc mainsail
 ```
+
+The latest backup can be restored the same way with the `restore` action.
 
 Do not start this on a printer until the vendor OTA package and both mode
 payloads are reviewed and the backup destination is verified. A power loss

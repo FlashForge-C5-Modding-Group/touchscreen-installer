@@ -21,9 +21,14 @@ export OC_DEMO_ROOT="$DEMO_ROOT"
 STATE_DIR=${OC_STATE_DIR:-"$DEMO_ROOT/usr/data/opencreator"}
 ROOTFS_STATE=$STATE_DIR/rootfs.state
 INSTALL_STATE=$STATE_DIR/install.json
-INSTALLER_VERSION=0.1.0
+INSTALLER_VERSION=0.2.0
+MIN_FREE_KB=${OC_MIN_FREE_KB:-262144}
+BACKUP_FOLDERS="usr/prog/klipper usr/prog/PROGRAM usr/data/config
+usr/data/klipper usr/prog/moonraker usr/prog/mainsail usr/data/fluidd"
 
 stage() { printf 'STAGE %s\n' "$*"; }
+warn() { printf 'WARN %s\n' "$*"; }
+progress() { printf 'PROGRESS %s %s\n' "$1" "$2"; }
 die() { printf 'ERROR %s\n' "$*"; exit 1; }
 hash_image() {
     [ -f "$ROOTFS" ] || die "squashfs image missing: $ROOTFS"
@@ -39,6 +44,30 @@ hash_image() {
     magic=$(dd if="$ROOTFS" bs=4 count=1 2>/dev/null)
     [ "$magic" = hsqs ] || die "not a little-endian squashfs image"
     IMAGE_HASH=$actual
+}
+# Sets MACHINE/PID from the stock boot script, which declares exactly
+# one of the two supported pairs. OC_MACHINE/OC_PID override it.
+detect_model() {
+    MACHINE=${OC_MACHINE:-}
+    PID=${OC_PID:-}
+    if [ -z "$MACHINE" ]; then
+        for f in "$DEMO_ROOT/usr/prog/app_startup.sh" "$DEMO_ROOT/usr/prog/PROGRAM/runFirmwareExe.sh"; do
+            [ -r "$f" ] || continue
+            MACHINE=$(sed -n 's/^[[:space:]]*MACHINE=\([A-Za-z0-9]*\).*/\1/p' "$f" | head -n 1)
+            PID=$(sed -n 's/^[[:space:]]*PID=\([0-9]*\).*/\1/p' "$f" | head -n 1)
+            [ -n "$MACHINE" ] && break
+        done
+    fi
+    if [ -z "$MACHINE" ] && [ -n "$DEMO_ROOT" ]; then
+        MACHINE=Creator5Pro
+        PID=0029
+    fi
+    case "$MACHINE:$PID" in
+        Creator5Pro:0029|Creator5:0028) return 0 ;;
+    esac
+    MACHINE=unknown
+    PID=unknown
+    return 1
 }
 current_ota_version() {
     [ -r /etc/ota_bin/ota_local_method.sh ] || die "vendor OTA methods unavailable"
@@ -59,7 +88,51 @@ rootfs_is_current() {
     current_ota_version
     [ "$CURRENT_OTA_VERSION" -ge "$saved_version" ]
 }
+free_kb() {
+    df -kP "$1" 2>/dev/null | awk 'NR == 2 { print $4 }'
+}
+preflight() {
+    data_dir=$DEMO_ROOT/usr/data
+    [ -d "$data_dir" ] || data_dir=${DEMO_ROOT:-/}
+    avail=$(free_kb "$data_dir")
+    if [ -n "$avail" ] && [ "$avail" -lt "$MIN_FREE_KB" ]; then
+        warn "Low space on /usr/data: $((avail / 1024)) MB free, $((MIN_FREE_KB / 1024)) MB recommended"
+    fi
+    if [ ! -d "$BACKUP_ROOT" ]; then
+        warn "Backup destination missing: $BACKUP_ROOT"
+    elif [ ! -w "$BACKUP_ROOT" ]; then
+        warn "Backup destination is not writable: $BACKUP_ROOT"
+    else
+        avail=$(free_kb "$BACKUP_ROOT")
+        if [ -n "$avail" ] && [ "$avail" -lt "$MIN_FREE_KB" ]; then
+            warn "Low space on backup drive: $((avail / 1024)) MB free"
+        fi
+    fi
+    for m in soc tunnel; do
+        set -- "$PAYLOAD/installers/$m"/*.sh
+        [ -f "$1" ] || warn "No $m installer scripts in payload"
+    done
+}
+latest_backup() {
+    LATEST_BACKUP=
+    if [ -f "$INSTALL_STATE" ]; then
+        recorded=$(sed -n 's/^  "backup": "\([^"]*\)",$/\1/p' "$INSTALL_STATE" | head -n 1)
+        if [ -n "$recorded" ] && [ -d "$recorded" ]; then LATEST_BACKUP=$recorded; fi
+    fi
+    if [ -z "$LATEST_BACKUP" ] && [ -d "$BACKUP_ROOT" ]; then
+        for dir in "$BACKUP_ROOT"/opencreator-*; do
+            if [ -d "$dir" ]; then LATEST_BACKUP=$dir; fi
+        done
+    fi
+    [ -n "$LATEST_BACKUP" ]
+}
 check() {
+    if detect_model; then
+        printf 'MODEL %s %s\n' "$MACHINE" "$PID"
+    else
+        printf 'MODEL unknown unknown\n'
+        warn "Printer model not detected (expected Creator5 or Creator5Pro in /usr/prog/app_startup.sh)"
+    fi
     if rootfs_is_current; then
         printf 'STATE CURRENT\n'
     else
@@ -74,6 +147,8 @@ check() {
     else
         stage "No prior OpenCreator install record"
     fi
+    preflight
+    if latest_backup; then printf 'BACKUP %s\n' "$LATEST_BACKUP"; fi
 }
 update_rootfs() {
     [ "$(id -u)" -eq 0 ] || die "rootfs update requires root"
@@ -124,8 +199,8 @@ backup_folders() {
     stamp=$(date -u +%Y%m%dT%H%M%SZ)
     target=$BACKUP_ROOT/opencreator-$stamp-$$
     mkdir "$target" || die "cannot create backup directory"
-    for folder in usr/prog/klipper usr/prog/PROGRAM usr/data/config \
-                 usr/data/klipper usr/prog/moonraker usr/prog/mainsail usr/data/fluidd; do
+    : > "$target/absent.list"
+    for folder in $BACKUP_FOLDERS; do
         if [ -d "$DEMO_ROOT/$folder" ]; then
             name=$(printf '%s' "$folder" | tr / _)
             stage "Backing up /$folder"
@@ -133,6 +208,7 @@ backup_folders() {
             mv "$target/$name.tar.gz.tmp" "$target/$name.tar.gz"
         else
             stage "Not present, skipping /$folder"
+            printf '%s\n' "$folder" >> "$target/absent.list"
         fi
     done
     BACKUP_TARGET=$target
@@ -146,38 +222,85 @@ install_payload() {
     [ "$MODE" != tunnel ] || [ "$WEB" = none ] || die "tunnel mode must skip web UI"
     [ "$MODE" != tunnel ] || [ "$TOUCHSCREEN" = no ] || die "tunnel mode must skip touchscreen"
     [ "$MODE" != soc ] || [ "$WEB" != none ] || die "SoC mode requires a web UI"
+    detect_model || die "unsupported or undetected printer model"
+    stage "Detected $MACHINE (PID $PID)"
     scripts=$PAYLOAD/installers/$MODE
     [ -d "$scripts" ] || die "install scripts missing: $scripts"
     found=0
+    total=2
     for script in "$scripts"/*.sh; do
         [ -f "$script" ] || continue
         found=1
+        total=$((total + 1))
         [ ! -L "$script" ] || die "symlinked installer refused: $script"
     done
     [ "$found" -eq 1 ] || die "no installer scripts in $scripts"
+    progress 0 "$total"
     backup_folders
+    n=1
+    progress "$n" "$total"
     for script in "$scripts"/*.sh; do
         [ -f "$script" ] || continue
+        n=$((n + 1))
         stage "Running ${script##*/}"
         OC_PAYLOAD="$PAYLOAD" OC_MODE="$MODE" OC_WEB_UI="$WEB" \
-            OC_TOUCHSCREEN="$TOUCHSCREEN" \
+            OC_TOUCHSCREEN="$TOUCHSCREEN" OC_MACHINE="$MACHINE" OC_PID="$PID" \
             OC_BACKUP="$BACKUP_TARGET" /bin/sh "$script" || die "failed: ${script##*/}"
+        progress "$n" "$total"
     done
     image_hash=none
     if [ "$ROOTFS" != - ]; then hash_image; image_hash=$IMAGE_HASH; fi
     mkdir -p "$STATE_DIR"
     stage "Writing install record"
-    printf '{\n  "installer_version": "%s",\n  "mode": "%s",\n  "web_ui": "%s",\n  "touchscreen": "%s",\n  "rootfs_sha256": "%s",\n  "backup": "%s",\n  "installed_utc": "%s"\n}\n' \
-        "$INSTALLER_VERSION" "$MODE" "$WEB" "$TOUCHSCREEN" "$image_hash" "$BACKUP_TARGET" \
-        "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$INSTALL_STATE.tmp"
+    printf '{\n  "installer_version": "%s",\n  "machine": "%s",\n  "pid": "%s",\n  "mode": "%s",\n  "web_ui": "%s",\n  "touchscreen": "%s",\n  "rootfs_sha256": "%s",\n  "backup": "%s",\n  "installed_utc": "%s"\n}\n' \
+        "$INSTALLER_VERSION" "$MACHINE" "$PID" "$MODE" "$WEB" "$TOUCHSCREEN" "$image_hash" \
+        "$BACKUP_TARGET" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$INSTALL_STATE.tmp"
     mv "$INSTALL_STATE.tmp" "$INSTALL_STATE"
     sync
+    progress "$total" "$total"
     stage "OpenCreator installation complete"
+}
+# Restores the newest backup. Archives may be rooted at / (backup_folders)
+# or at the folder's parent (oc_backup_and_remove), so check the first entry.
+restore_backup() {
+    [ -n "$DEMO_ROOT" ] || [ "$(id -u)" -eq 0 ] || die "restore requires root"
+    latest_backup || die "no OpenCreator backup found in $BACKUP_ROOT"
+    case "$LATEST_BACKUP" in
+        *[!A-Za-z0-9_./-]*) die "backup path contains unsupported characters" ;;
+    esac
+    stage "Restoring from $LATEST_BACKUP"
+    total=0
+    for folder in $BACKUP_FOLDERS; do total=$((total + 1)); done
+    n=0
+    progress 0 "$total"
+    for folder in $BACKUP_FOLDERS; do
+        n=$((n + 1))
+        archive=$LATEST_BACKUP/$(printf '%s' "$folder" | tr / _).tar.gz
+        if [ -f "$archive" ]; then
+            first=$(tar -tzf "$archive" | head -n 1) || die "backup archive unreadable: ${archive##*/}"
+            case "$first" in
+                usr/*) dest=${DEMO_ROOT:-/} ;;
+                *) dest=$DEMO_ROOT/${folder%/*} ;;
+            esac
+            stage "Restoring /$folder"
+            rm -rf "$DEMO_ROOT/$folder"
+            mkdir -p "$dest"
+            tar -C "$dest" -xzf "$archive" || die "restore failed: /$folder"
+        elif grep -qx "$folder" "$LATEST_BACKUP/absent.list" 2>/dev/null; then
+            stage "Removing /$folder (absent before install)"
+            rm -rf "$DEMO_ROOT/$folder"
+        fi
+        progress "$n" "$total"
+    done
+    rm -f "$INSTALL_STATE"
+    sync
+    stage "Restore complete; reboot to start the restored stack"
 }
 
 case "$ACTION" in
     check) check ;;
     rootfs) update_rootfs ;;
     install) install_payload ;;
+    restore) restore_backup ;;
     *) die "unknown action" ;;
 esac
