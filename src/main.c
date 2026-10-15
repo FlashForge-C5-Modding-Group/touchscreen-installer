@@ -209,7 +209,7 @@ static void update_version(void)
     char boards[64] = "";
     if (strcmp(mcu_boards, "none") != 0)
         snprintf(boards, sizeof(boards), " (boards %.8s)", mcu_boards);
-    snprintf(buf, sizeof(buf), "Installer %s  |  MCU firmware %.8s%s  |  Kernel %s  |  Built %s",
+    snprintf(buf, sizeof(buf), "Installer %s  |  MCU firmware %.8s%s  |  Kernel %.40s  |  Built %s",
              installer_version, mcu_drive, boards, kernel_text, __DATE__);
     lv_label_set_text(version_label, buf);
 }
