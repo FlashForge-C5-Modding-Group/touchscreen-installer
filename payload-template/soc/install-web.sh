@@ -48,5 +48,32 @@ sed -i "s#^\([[:space:]]*root[[:space:]]\).*;#\1$WEB_ROOT;#" "$SITE"
 grep -q "root $WEB_ROOT;" "$SITE" || die "could not set the nginx web root in $SITE"
 mkdir -p "$NGINX/sites-enabled"
 ln -sf /usr/data/nginx/sites-available/mainsail "$NGINX/sites-enabled/mainsail"
+
+# A kept, older moonraker.conf may lack an update section for one of the UIs.
+MOONRAKER_CONF=$DEMO_ROOT/usr/data/opencreator/klipper/config/moonraker.conf
+add_update_entry() {  # add_update_entry NAME REPO PATH
+    grep -q "^\[update_manager $1\]" "$MOONRAKER_CONF" && return 0
+    echo "STAGE Adding $1 to Moonraker's update manager"
+    printf '\n[update_manager %s]\ntype: web\nchannel: stable\nrepo: %s\npath: %s\n' \
+        "$1" "$2" "$3" >> "$MOONRAKER_CONF"
+}
+if [ -f "$MOONRAKER_CONF" ]; then
+    grep -q '^\[update_manager\]' "$MOONRAKER_CONF" ||
+        printf '\n[update_manager]\nrefresh_interval: 168\nenable_auto_refresh: false\n' >> "$MOONRAKER_CONF"
+    # buildroot has no package manager Moonraker supports; without this it
+    # shows a warning in the web UI.
+    grep -q '^enable_system_updates:' "$MOONRAKER_CONF" ||
+        sed -i 's#^\[update_manager\]$#[update_manager]\nenable_system_updates: False#' "$MOONRAKER_CONF"
+    # Pages from the printer's own address are always allowed; these cover
+    # hostnames. IP wildcards are rejected by Moonraker.
+    if ! grep -q '^cors_domains:' "$MOONRAKER_CONF"; then
+        echo "STAGE Allowing local hostnames in Moonraker (cors_domains)"
+        grep -q '^\[authorization\]' "$MOONRAKER_CONF" ||
+            printf '\n[authorization]\n' >> "$MOONRAKER_CONF"
+        sed -i 's#^\[authorization\]$#[authorization]\ncors_domains:\n  *://*.local\n  *://*.lan\n  *://localhost\n  *://localhost:*#' "$MOONRAKER_CONF"
+    fi
+    add_update_entry mainsail mainsail-crew/mainsail /usr/data/mainsail
+    add_update_entry fluidd fluidd-core/fluidd /usr/data/fluidd
+fi
 sync
 echo "STAGE nginx serves $WEB_UI on port 80"
