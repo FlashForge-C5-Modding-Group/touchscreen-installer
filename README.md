@@ -42,8 +42,17 @@ Both modes start with:
    `firmwareExe` replaces `/usr/prog/PROGRAM/software/firmwareExe` (the stock
    binary is kept once as `/usr/data/opencreator/firmwareExe.stock`), with its
    `startup/`, `tunneled/` and `moonraker/` folders in `/usr/data/opencreator`,
-   and the nginx snippets in `/usr/data/nginx/conf.d`.
-3. **MCU firmware**, from the package on the drive, if any.
+   the nginx snippets in `/usr/data/nginx/conf.d`, and the OpenCreator boot logo
+   (`payload/common/logo.jpeg`, made by `scripts/gen-boot-logo.py`) at
+   `/usr/data/logo.jpeg`. The stock logo is kept as
+   `/usr/data/opencreator/logo.jpeg.stock` and in the backup. `/etc/logo.jpeg`
+   (used when `/usr/data/logo.jpeg` is missing) is left alone.
+3. **MCU firmware**, last of all (`95-flash-mcu-firmware.sh`), from the package
+   on the drive named for the printer: `Creator5Pro-*.tgz` on a Creator 5 Pro,
+   `Creator5-*.tgz` on a Creator 5, as the stock USB update does. Build them
+   with Kalico's `scripts/build_c5_update.py all` (one `--template`/`--output`
+   pair per model; it needs `C5_UPDATE_PASSPHRASE`) and add them with
+   `MCU_PACKAGE="Creator5Pro-....tgz Creator5-....tgz" make usb`.
 
 SoC mode then installs:
 
@@ -206,6 +215,8 @@ payload/
   common/install-entware.sh        # Entware and legacy NaN (both modes)
   common/install-loopscript.sh     # opencreator-fs LoopScript (both modes)
   common/flash-mcu-firmware.sh     # MCU firmware (both modes)
+  common/enable-root.sh            # root login opencreator / FlashForge2026 (both modes)
+  common/activate-loopscript.sh    # last step: Legacy LoopScript off, firmwareExe, boot logo
   soc/install-stack.sh             # Kalico and printer config
   soc/install-moonraker.sh         # Moonraker
   soc/install-web.sh               # Mainsail, Fluidd and the nginx web root
@@ -214,7 +225,13 @@ payload/
 ```
 
 The wrappers in `payload-template/installers` run in name order: Entware
-first, since every later step needs its git. Both modes have
+first, since every later step needs its git, and `90-activate-loopscript.sh`
+last. Until that last step the printer still boots the stock `firmwareExe`
+and logo, so a failed install leaves a working stock printer. Kalico and
+Moonraker are built next to the current ones and only swapped in when they
+have built; on failure the current ones are put back. The Kalico step only
+pip-installs the Klippy modules that are missing (unpinned), since the pinned
+requirements would build numpy from source on the printer. Both modes have
 `30-install-grumpyscreen.sh`, which runs `soc/installgrumpy.sh` when the
 touchscreen was chosen: it downloads the latest GrumpyScreen release and checks
 that it is an ELF binary. Everything except the MCU firmware package (a
@@ -223,7 +240,39 @@ installer fails visibly and leaves the backup intact. Scripts can emit
 `STAGE message` to show progress. The backup destination must exist and be
 writable; use an external USB mount for recoverability.
 
-Run as root, with no other touchscreen UI active:
+## Installer USB drive
+
+`make usb` builds the MIPS app and assembles the drive in `dist/usb`. Copy
+everything in that folder to the root of a FAT32 USB drive. `MCU_PACKAGE=path`
+also adds an MCU firmware package (with its `.sha256` and `.manifest.json`).
+
+```text
+runFirmwareExe.sh            # run by the stock app_startup.sh at boot
+opencreator/
+  opencreator-installer      # the app
+  install.sh                 # backend
+  payload/                   # payload-template
+  backups/                   # backups and opencreator-installer.log
+```
+
+At boot, the stock `/usr/prog/app_startup.sh` mounts the drive at `/mnt` and
+runs `runFirmwareExe.sh` before the Wi-Fi driver and the FlashForge UI start.
+The script shows the logo (`opencreator-installer --splash "message"`), loads
+the Wi-Fi driver, joins the network saved on the printer
+(`/usr/prog/wifi/wpa_supplicant.conf`), waits up to a minute for internet and
+sets the clock. It then loads the touchscreen driver (`gt9xx_touch.ko`, with
+the stock parameters, which `app_startup.sh` would only load later) and starts
+the app.
+
+The panel's framebuffer is portrait. The app draws an 800×480 landscape UI and
+rotates it with LVGL's software rotation (rotation 1, the same as GrumpyScreen's
+`display_rotate: 1`); touch is passed to LVGL in panel pixels and rotated with
+it. `OC_DISPLAY_ROTATE=0..3` overrides the rotation. Its own log is
+`opencreator/runFirmwareExe.log`. If the app can't start, the printer boots
+normally. Unplug the drive after installing, or the installer opens again on
+the next boot.
+
+Run by hand as root, with no other touchscreen UI active:
 
 ```sh
 opencreator-installer /media/usb/opencreator-payload /media/usb/backups \
@@ -243,3 +292,28 @@ Entware, the NaN switch and anything that needs the printer.
 
 Do not start this on a printer until both mode payloads are reviewed and the
 backup destination is verified.
+
+## OpenCreator Legacy LoopScript
+
+If `/usr/prog/app_startup.sh` starts OpenCreator Legacy's LoopScript
+(`/usr/prog/scripts/loop/loop.sh &`, added by its guide), the activation step
+replaces that line with a no-op (`: # OpenCreator: Legacy LoopScript disabled
+...`), so `if` blocks around it stay valid. `app_startup.sh` also runs the USB
+update check, so a broken copy would brick the printer: the edited copy must
+have the same number of lines, differ only in the replaced lines, pass
+`sh -n`, and still contain the `runFirmwareExe.sh` check and the `firmwareExe`
+launch. Only then does it replace the original, and it is set to `chmod 777`
+and checked again. The original is kept as `app_startup.sh.opencreator-legacy`
+and in the backup. `/usr/prog/scripts/` itself is left in place.
+
+## Root login
+
+`85-enable-root.sh` adds the root login `opencreator` with the password
+`FlashForge2026` (an MD5-crypt hash, made with
+`openssl passwd -1 -salt OpenCr26 FlashForge2026`), the same way OpenCreator
+Legacy's root enabler adds one: a uid 0 line in `/etc/passwd`, home
+`/usr/data/home/opencreator`, shell `/bin/sh`. `/etc/passwd` is copied once to
+`/etc/passwd.opencreator-bak`, and the new copy must still have `root`, one
+`opencreator` line and every other line unchanged before it replaces the
+original. An existing `opencreator` line is left alone, so a password changed
+with `passwd opencreator` survives a reinstall.

@@ -47,6 +47,9 @@ int platform_init(const char *framebuffer, const char *input,
     fb_size = fix.smem_len;
     fb_map = mmap(NULL, fb_size, PROT_READ | PROT_WRITE, MAP_SHARED, fb_fd, 0);
     if (fb_map == MAP_FAILED) return -1;
+    *width = var.xres;
+    *height = var.yres;
+    if (!input) return 0;
     input_fd = open(input, O_RDONLY | O_NONBLOCK | O_CLOEXEC);
     if (input_fd < 0) return -1;
     if (read_axis(ABS_MT_POSITION_X, &x_min, &x_max) != 0 ||
@@ -54,8 +57,6 @@ int platform_init(const char *framebuffer, const char *input,
         if (read_axis(ABS_X, &x_min, &x_max) != 0 ||
             read_axis(ABS_Y, &y_min, &y_max) != 0) return -1;
     }
-    *width = var.xres;
-    *height = var.yres;
     return 0;
 }
 
@@ -85,12 +86,11 @@ void platform_flush(lv_disp_drv_t *drv, const lv_area_t *area,
     lv_disp_flush_ready(drv);
 }
 
-static int scale(int value, int minimum, int maximum, int extent)
+static int clamp(int value, int extent)
 {
-    if (maximum <= minimum) return 0;
-    if (value < minimum) value = minimum;
-    if (value > maximum) value = maximum;
-    return (value - minimum) * (extent - 1) / (maximum - minimum);
+    if (value < 0) return 0;
+    if (value >= extent) return extent - 1;
+    return value;
 }
 
 void platform_touch(lv_indev_drv_t *drv, lv_indev_data_t *data)
@@ -111,7 +111,9 @@ void platform_touch(lv_indev_drv_t *drv, lv_indev_data_t *data)
             touching = event.value != 0;
         }
     }
-    data->point.x = scale(x_raw, x_min, x_max, (int)var.xres);
-    data->point.y = scale(y_raw, y_min, y_max, (int)var.yres);
+    /* The Goodix driver reports panel pixels; LVGL rotates them to match the
+     * rotated display. */
+    data->point.x = clamp(x_raw, (int)var.xres);
+    data->point.y = clamp(y_raw, (int)var.yres);
     data->state = touching ? LV_INDEV_STATE_PRESSED : LV_INDEV_STATE_RELEASED;
 }

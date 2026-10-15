@@ -11,7 +11,6 @@ TOUCHSCREEN=${OC_TOUCHSCREEN:-no}
 
 OPENCREATOR_FS_REPO=${OC_FS_REPO:-https://github.com/FlashForge-C5-Modding-Group/opencreator-fs.git}
 OCDIR=$DEMO_ROOT/usr/data/opencreator
-FIRMWARE_EXE=$DEMO_ROOT/usr/prog/PROGRAM/software/firmwareExe
 NGINX_CONF_D=$DEMO_ROOT/usr/data/nginx/conf.d
 GRUMPY_DIR=$DEMO_ROOT/usr/data/grumpyscreen
 
@@ -42,16 +41,5 @@ if [ "$TOUCHSCREEN" = yes ] && [ ! -f "$GRUMPY_DIR/grumpyscreen.cfg" ]; then
     cp "$FS/grumpyscreen/grumpyscreen.cfg" "$GRUMPY_DIR/grumpyscreen.cfg"
 fi
 
-echo "STAGE Replacing firmwareExe with the LoopScript launcher"
-mkdir -p "$(dirname "$FIRMWARE_EXE")"
-if [ -f "$FIRMWARE_EXE" ] && [ ! -f "$OCDIR/firmwareExe.stock" ]; then
-    magic=$(dd if="$FIRMWARE_EXE" bs=1 skip=1 count=3 2>/dev/null)
-    if [ "$magic" = ELF ]; then
-        cp -p "$FIRMWARE_EXE" "$OCDIR/firmwareExe.stock"
-    fi
-fi
-cp "$OCDIR/firmware/firmwareExe" "$FIRMWARE_EXE.new"
-chmod 755 "$FIRMWARE_EXE.new"
-mv "$FIRMWARE_EXE.new" "$FIRMWARE_EXE"
 sync
-echo "STAGE LoopScript installed"
+echo "STAGE LoopScript files installed (activated at the end)"

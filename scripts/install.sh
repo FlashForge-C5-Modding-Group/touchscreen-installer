@@ -19,12 +19,24 @@ export OC_DEMO_ROOT="$DEMO_ROOT"
 # Entware (installed by the first payload step) provides git, curl, gcc
 # and Python; later steps find it here.
 export PATH=/opt/bin:/opt/sbin:$PATH
+# Started from the USB boot hook, HOME is the read-only / (pip then fails to
+# write /.cache), and /tmp is a small RAM disk; use /usr/data for both.
+if [ -z "$DEMO_ROOT" ]; then
+    if [ -z "${HOME:-}" ] || ! touch "$HOME/.oc-write-test" 2>/dev/null; then
+        export HOME=/usr/data/opencreator/home
+    fi
+    rm -f "$HOME/.oc-write-test"
+    export TMPDIR=/usr/data/opencreator/tmp
+    mkdir -p "$HOME" "$TMPDIR"
+    rm -rf "${TMPDIR:?}"/* 2>/dev/null || true
+fi
 STATE_DIR=${OC_STATE_DIR:-"$DEMO_ROOT/usr/data/opencreator"}
 INSTALL_STATE=$STATE_DIR/install.json
 INSTALLER_VERSION=0.3.0
 MIN_FREE_KB=${OC_MIN_FREE_KB:-262144}
 BACKUP_FOLDERS="usr/prog/PROGRAM usr/prog/moonraker usr/data/opencreator
-usr/data/mainsail usr/data/fluidd usr/data/nginx usr/prog/c5-tunnel-socat"
+usr/data/mainsail usr/data/fluidd usr/data/nginx usr/prog/c5-tunnel-socat
+usr/data/logo.jpeg usr/prog/app_startup.sh"
 
 stage() { printf 'STAGE %s\n' "$*"; }
 warn() { printf 'WARN %s\n' "$*"; }
@@ -90,6 +102,9 @@ preflight() {
         set -- "$PAYLOAD/installers/$m"/*.sh
         [ -f "$1" ] || warn "No $m installer scripts in payload"
     done
+    if [ -z "$DEMO_ROOT" ] && ! ping -c1 -W3 github.com >/dev/null 2>&1; then
+        warn "No internet: the install downloads Entware and the rest, connect Wi-Fi first"
+    fi
 }
 latest_backup() {
     LATEST_BACKUP=
@@ -105,6 +120,7 @@ latest_backup() {
     [ -n "$LATEST_BACKUP" ]
 }
 check() {
+    printf 'VERSION %s\n' "$INSTALLER_VERSION"
     if detect_model; then
         printf 'MODEL %s %s\n' "$MACHINE" "$PID"
     else
@@ -116,6 +132,14 @@ check() {
     else
         printf 'KERNEL MISMATCH %s\n' "$KERNEL_PACKAGE"
     fi
+    # MCU firmware on the drive for this model, and what the boards last got.
+    mcu=none
+    for manifest in "$PAYLOAD/mcu-firmware/${MACHINE:-none}"-*.tgz.manifest.json; do
+        [ -f "$manifest" ] || continue
+        mcu=$(sed -n 's/.*"commit": *"\([0-9a-f]\{7,40\}\)".*/\1/p' "$manifest" | head -n 1)
+    done
+    flashed=$(cat "$STATE_DIR/mcu-firmware.commit" 2>/dev/null || echo none)
+    printf 'MCU %s %s\n' "${mcu:-none}" "$flashed"
     if [ -f "$INSTALL_STATE" ]; then
         previous_version=$(sed -n 's/^  "installer_version": "\([^"]*\)",$/\1/p' "$INSTALL_STATE" | head -n 1)
         previous_mode=$(sed -n 's/^  "mode": "\([^"]*\)",$/\1/p' "$INSTALL_STATE" | head -n 1)
@@ -150,11 +174,15 @@ backup_folders() {
     mkdir "$target" || die "cannot create backup directory"
     : > "$target/absent.list"
     for folder in $BACKUP_FOLDERS; do
-        if [ -d "$DEMO_ROOT/$folder" ]; then
+        if [ -e "$DEMO_ROOT/$folder" ]; then
             name=$(printf '%s' "$folder" | tr / _)
             stage "Backing up /$folder"
-            tar -C "${DEMO_ROOT:-/}" -czf "$target/$name.tar.gz.tmp" "$folder" || die "backup failed: /$folder"
-            mv "$target/$name.tar.gz.tmp" "$target/$name.tar.gz"
+            # The printer's busybox tar has no -z, so compress separately.
+            tar -C "${DEMO_ROOT:-/}" -cf "$target/$name.tar.tmp" "$folder" || die "backup failed: /$folder"
+            mv "$target/$name.tar.tmp" "$target/$name.tar"
+            if command -v gzip >/dev/null 2>&1; then
+                gzip -f "$target/$name.tar" || die "backup compression failed: /$folder"
+            fi
         else
             stage "Not present, skipping /$folder"
             printf '%s\n' "$folder" >> "$target/absent.list"
@@ -172,6 +200,11 @@ install_payload() {
     [ "$MODE" != soc ] || [ "$WEB" != none ] || die "SoC mode requires a web UI"
     detect_model || die "unsupported or undetected printer model"
     stage "Detected $MACHINE (PID $PID)"
+    missing_tools=
+    for tool in tar gzip gunzip md5sum sed grep awk find mktemp wget od dd; do
+        command -v "$tool" >/dev/null 2>&1 || missing_tools="$missing_tools $tool"
+    done
+    [ -z "$missing_tools" ] || die "the printer is missing:$missing_tools; nothing was changed"
     kernel_supported || die "unsupported FlashForge kernel package $KERNEL_PACKAGE (legacy NaN address unknown)"
     stage "Kernel package $KERNEL_PACKAGE"
     scripts=$PAYLOAD/installers/$MODE
@@ -186,7 +219,16 @@ install_payload() {
     done
     [ "$found" -eq 1 ] || die "no installer scripts in $scripts"
     progress 0 "$total"
-    backup_folders
+    if [ "${OC_SKIP_BACKUP:-0}" = 1 ]; then
+        stage "Skipping the backup (Install without backup)"
+        # Payload steps still keep small "previous" copies here.
+        BACKUP_TARGET=$STATE_DIR/no-backup
+        mkdir -p "$BACKUP_TARGET"
+        RECORDED_BACKUP=none
+    else
+        backup_folders
+        RECORDED_BACKUP=$BACKUP_TARGET
+    fi
     n=1
     progress "$n" "$total"
     for script in "$scripts"/*.sh; do
@@ -203,14 +245,20 @@ install_payload() {
     stage "Writing install record"
     printf '{\n  "installer_version": "%s",\n  "machine": "%s",\n  "pid": "%s",\n  "kernel_package": "%s",\n  "mode": "%s",\n  "web_ui": "%s",\n  "touchscreen": "%s",\n  "backup": "%s",\n  "installed_utc": "%s"\n}\n' \
         "$INSTALLER_VERSION" "$MACHINE" "$PID" "$KERNEL_PACKAGE" "$MODE" "$WEB" "$TOUCHSCREEN" \
-        "$BACKUP_TARGET" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$INSTALL_STATE.tmp"
+        "$RECORDED_BACKUP" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$INSTALL_STATE.tmp"
     mv "$INSTALL_STATE.tmp" "$INSTALL_STATE"
     sync
     progress "$total" "$total"
     stage "OpenCreator installation complete"
 }
 # Restores the newest backup. Archives may be rooted at / (backup_folders)
-# or at the folder's parent (oc_backup_and_remove), so check the first entry.
+# or (older installers) at the folder's parent, so check the first entry.
+unpack() {
+    case "$1" in
+        *.gz) gunzip -c "$1" ;;
+        *) cat "$1" ;;
+    esac
+}
 restore_backup() {
     [ -n "$DEMO_ROOT" ] || [ "$(id -u)" -eq 0 ] || die "restore requires root"
     latest_backup || die "no OpenCreator backup found in $BACKUP_ROOT"
@@ -224,9 +272,13 @@ restore_backup() {
     progress 0 "$total"
     for folder in $BACKUP_FOLDERS; do
         n=$((n + 1))
-        archive=$LATEST_BACKUP/$(printf '%s' "$folder" | tr / _).tar.gz
+        archive=$LATEST_BACKUP/$(printf '%s' "$folder" | tr / _).tar
+        [ -f "$archive" ] || archive=$archive.gz
         if [ -f "$archive" ]; then
-            first=$(tar -tzf "$archive" | head -n 1) || die "backup archive unreadable: ${archive##*/}"
+            case "$archive" in
+                *.gz) gunzip -t "$archive" || die "backup archive damaged: ${archive##*/}" ;;
+            esac
+            first=$(unpack "$archive" | tar -tf - | head -n 1) || die "backup archive unreadable: ${archive##*/}"
             case "$first" in
                 usr/*) dest=${DEMO_ROOT:-/} ;;
                 *) dest=$DEMO_ROOT/${folder%/*} ;;
@@ -234,7 +286,7 @@ restore_backup() {
             stage "Restoring /$folder"
             rm -rf "$DEMO_ROOT/$folder"
             mkdir -p "$dest"
-            tar -C "$dest" -xzf "$archive" || die "restore failed: /$folder"
+            unpack "$archive" | tar -C "$dest" -xf - || die "restore failed: /$folder"
         elif grep -qx "$folder" "$LATEST_BACKUP/absent.list" 2>/dev/null; then
             stage "Removing /$folder (absent before install)"
             rm -rf "$DEMO_ROOT/$folder"

@@ -6,15 +6,17 @@ set -eu
 : "${OC_MODE:?}"
 : "${OC_NAN_ADDR:?}"
 DEMO_ROOT=${OC_DEMO_ROOT:-}
+: "${OC_PAYLOAD:?}"
+. "$OC_PAYLOAD/common/install-helpers.sh"
 
 OPT_STORE=$DEMO_ROOT/usr/data/bin/opt
 ENTWARE=http://bin.entware.net/mipselsf-k3.4
-PACKAGES="git git-http curl ca-bundle gcc"
+PACKAGES="git git-http curl ca-bundle gcc tar xz"
 case "$OC_MODE" in
 soc)
     PACKAGES="$PACKAGES python3 python3-pip python3-dev python3-pillow python3-numpy
 python3-msgpack python3-cryptography python3-cffi python3-yaml python3-requests
-python3-setuptools libsodium libffi lmdb"
+python3-setuptools libsodium libffi lmdb swap-utils"
     ;;
 tunnel)
     PACKAGES="$PACKAGES socat"
@@ -37,21 +39,33 @@ rdate -s time.nist.gov 2>/dev/null || echo "STAGE Clock not set (no time server)
 echo "STAGE Enabling legacy NaN"
 busybox devmem "$OC_NAN_ADDR" 8 1
 
-mkdir -p "$OPT_STORE"
-grep -q ' /opt ' /proc/mounts || mount --bind "$OPT_STORE" /opt \
-    || die "cannot bind-mount $OPT_STORE on /opt"
-
+if [ -x /opt/bin/opkg ]; then
+    echo "STAGE Entware already installed"
+else
+    mkdir -p "$OPT_STORE"
+    grep -q ' /opt ' /proc/mounts || mount --bind "$OPT_STORE" /opt \
+        || die "cannot bind-mount $OPT_STORE on /opt"
+fi
 if [ ! -x /opt/bin/opkg ]; then
     echo "STAGE Installing Entware"
     wget -O - "$ENTWARE/installer/generic.sh" | sh || die "Entware installer failed"
 fi
 [ -x /opt/bin/opkg ] || die "opkg missing after the Entware install"
 
-echo "STAGE Updating Entware packages"
-/opt/bin/opkg update || die "opkg update failed"
-echo "STAGE Installing Entware packages (this takes a while)"
-# shellcheck disable=SC2086
-/opt/bin/opkg install $PACKAGES || die "opkg install failed"
+installed=$(/opt/bin/opkg list-installed 2>/dev/null | cut -d' ' -f1)
+missing=
+for package in $PACKAGES; do
+    printf '%s\n' "$installed" | grep -qx "$package" || missing="$missing $package"
+done
+if [ -n "$missing" ]; then
+    echo "STAGE Updating Entware package lists"
+    /opt/bin/opkg update || die "opkg update failed"
+    echo "STAGE Installing Entware packages:$missing (this takes a while)"
+    # shellcheck disable=SC2086
+    oc_run_staged /opt/bin/opkg install $missing || die "opkg install failed"
+else
+    echo "STAGE All Entware packages already installed"
+fi
 
 if [ ! -f /opt/include/stdio.h ]; then
     echo "STAGE Installing compiler headers"

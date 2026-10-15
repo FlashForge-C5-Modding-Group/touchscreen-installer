@@ -18,7 +18,7 @@ LVGL_SOURCES := $(shell find $(LVGL_DIR)/$(LVGL_DIR_NAME)/src -name '*.c' -print
 SOURCES := src/main.c src/platform.c src/logo.c $(LVGL_SOURCES)
 OBJECTS := $(patsubst %.c,$(BUILD_DIR)/%.o,$(SOURCES))
 
-.PHONY: all mips32 sdl logo clean
+.PHONY: all mips32 sdl usb logo clean
 all: $(BUILD_DIR)/opencreator-installer
 mips32:
 	$(MAKE) CROSS_COMPILE=$(INGENIC_TOOLCHAIN)/bin/mips-xburst2-linux-gnu- \
@@ -30,6 +30,9 @@ sdl:
 	  CFLAGS="$(CFLAGS) -DOC_DEMO" \
 	  SOURCES="src/main.c src/platform_sdl.c src/logo.c $(LVGL_SOURCES)" \
 	  LDLIBS="$(LDLIBS) $$(pkg-config --libs sdl2)" all
+
+usb: mips32
+	sh scripts/make-usb.sh
 
 $(BUILD_DIR)/opencreator-installer: $(OBJECTS)
 	@mkdir -p $(dir $@)

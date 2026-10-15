@@ -39,6 +39,9 @@ static size_t line_len;
 static char current_action[16];
 static bool kernel_ok;
 static char kernel_text[160] = "unknown";
+static char installer_version[32] = "?";
+static char mcu_drive[48] = "none", mcu_boards[48] = "none";
+static lv_obj_t *version_label;
 static uint64_t running_since, splash_until;
 static char machine[32] = "unknown";
 static bool model_known;
@@ -46,7 +49,7 @@ static char backup_found[512];
 static char warn_text[1024];
 static char log_text[12288];
 static size_t log_len;
-static FILE *log_file;
+static FILE *log_files[2];
 
 #define OC_COLOR_BG       0x151a22
 #define OC_COLOR_CARD     0x1f2630
@@ -135,6 +138,15 @@ static void refresh_log_view(void)
 }
 
 /* Keeps the newest output on screen and appends everything to the log file. */
+static uint64_t log_synced;
+
+static void sync_log_files(void)
+{
+    for (int i = 0; i < 2; i++)
+        if (log_files[i]) fsync(fileno(log_files[i]));
+    log_synced = now_ms();
+}
+
 static void log_line(const char *line)
 {
     size_t n = strnlen(line, 512);
@@ -148,24 +160,33 @@ static void log_line(const char *line)
     log_len += n;
     log_text[log_len++] = '\n';
     log_text[log_len] = '\0';
-    if (log_file) {
-        time_t t = time(NULL);
-        struct tm tm;
-        localtime_r(&t, &tm);
-        fprintf(log_file, "%04d-%02d-%02d %02d:%02d:%02d [%s] %.*s\n",
+    time_t t = time(NULL);
+    struct tm tm;
+    localtime_r(&t, &tm);
+    bool urgent = strncmp(line, "ERROR ", 6) == 0;
+    for (int i = 0; i < 2; i++) {
+        if (!log_files[i]) continue;
+        fprintf(log_files[i], "%04d-%02d-%02d %02d:%02d:%02d [%s] %.*s\n",
                 tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour,
                 tm.tm_min, tm.tm_sec, current_action, (int)n, line);
-        fflush(log_file);
+        fflush(log_files[i]);
     }
+    if (urgent || now_ms() - log_synced > 2000) sync_log_files();
     refresh_log_view();
 }
 
+/* The log on the USB drive (FAT, page cache) is fsync'd so it survives the
+ * drive being pulled or the printer being switched off after an error; the
+ * copy on /usr/data (mounted with sync) is written through immediately. */
 static void open_log_file(void)
 {
     char path[512];
     snprintf(path, sizeof(path), "%s/opencreator-installer.log", backup_path);
-    log_file = fopen(path, "a");
-    if (!log_file) log_file = fopen("/tmp/opencreator-installer.log", "a");
+    log_files[0] = fopen(path, "a");
+    if (!log_files[0]) log_files[0] = fopen("/tmp/opencreator-installer.log", "a");
+#ifndef OC_DEMO
+    log_files[1] = fopen("/usr/data/logs/opencreator-installer.log", "a");
+#endif
 }
 
 static void clear_buttons(void)
@@ -180,6 +201,17 @@ static void update_brand(void)
     static char buf[64];
     snprintf(buf, sizeof(buf), "OPENCREATOR  |  %s", model_name());
     lv_label_set_text(brand_label, buf);
+}
+
+static void update_version(void)
+{
+    static char buf[256];
+    char boards[64] = "";
+    if (strcmp(mcu_boards, "none") != 0)
+        snprintf(boards, sizeof(boards), " (boards %.8s)", mcu_boards);
+    snprintf(buf, sizeof(buf), "Installer %s  |  MCU firmware %.8s%s  |  Kernel %s  |  Built %s",
+             installer_version, mcu_drive, boards, kernel_text, __DATE__);
+    lv_label_set_text(version_label, buf);
 }
 
 static void start_action(const char *action)
@@ -251,9 +283,12 @@ static void action_button(lv_event_t *event)
         touchscreen = "yes"; show_page(PAGE_READY);
     } else if (strcmp(action, "touch-no") == 0) {
         touchscreen = "no"; show_page(PAGE_READY);
-    } else if (strcmp(action, "install") == 0) { demo_root = NULL; start_action("install"); }
-    else if (strcmp(action, "demo-install") == 0) {
-        demo_root = OC_DEMO_INSTALL_ROOT; start_action("install");
+    } else if (strcmp(action, "install") == 0) {
+        demo_root = NULL; unsetenv("OC_SKIP_BACKUP"); start_action("install");
+    } else if (strcmp(action, "install-nobackup") == 0) {
+        demo_root = NULL; setenv("OC_SKIP_BACKUP", "1", 1); start_action("install");
+    } else if (strcmp(action, "demo-install") == 0) {
+        demo_root = OC_DEMO_INSTALL_ROOT; unsetenv("OC_SKIP_BACKUP"); start_action("install");
     } else if (strcmp(action, "back") == 0) show_page(PAGE_MODE);
     else if (strcmp(action, "restore-confirm") == 0) show_page(PAGE_RESTORE);
     else if (strcmp(action, "restore") == 0) { demo_root = NULL; start_action("restore"); }
@@ -287,12 +322,13 @@ static lv_obj_t *make_button(lv_obj_t *parent, const char *text, const char *act
     return button;
 }
 
-/* "Back", "No", "Restore" and "Mainsail" are secondary; every other action is the
- * page's primary (forward-moving) action. */
+/* "Back", "No", "Restore", "Mainsail" and "Install without backup" are
+ * secondary; every other action is the page's primary (forward-moving) action. */
 static void add_button(const char *text, const char *action)
 {
     bool secondary = strcmp(action, "back") == 0 || strcmp(action, "touch-no") == 0 ||
-                     strcmp(action, "restore-confirm") == 0 || strcmp(action, "mainsail") == 0;
+                     strcmp(action, "restore-confirm") == 0 || strcmp(action, "mainsail") == 0 ||
+                     strcmp(action, "install-nobackup") == 0;
     make_button(button_row, text, action, !secondary, 220, 58);
 }
 
@@ -399,6 +435,9 @@ static void show_page(enum page next)
 #ifdef OC_DEMO
         add_button("Demo install", "demo-install");
 #endif
+#ifndef OC_DEMO
+        if (model_known) add_button("Install without backup", "install-nobackup");
+#endif
         if (model_known) add_button("Back up and install", "install");
         break;
     case PAGE_RESTORE:
@@ -419,7 +458,9 @@ static void show_page(enum page next)
         lv_label_set_text(body_label, demo_root
             ? "Follow the live status below. Writing to " OC_DEMO_INSTALL_ROOT
               ", not the real system -- safe to power off."
-            : "Follow the live status below. Do not power off.");
+            : "This may take a while (often 30 minutes or more): Entware, Python "
+              "packages and the MCU firmware are installed one after another. "
+              "Follow the live status below and do not power off.");
         lv_obj_clear_flag(spinner, LV_OBJ_FLAG_HIDDEN);
         lv_obj_clear_flag(progress_bar, LV_OBJ_FLAG_HIDDEN);
         break;
@@ -461,6 +502,13 @@ static void process_line(char *line)
         kernel_ok = strncmp(line + 7, "OK ", 3) == 0;
         const char *ver = strchr(line + 7, ' ');
         snprintf(kernel_text, sizeof(kernel_text), "%.150s", ver ? ver + 1 : "unknown");
+        update_version();
+    } else if (strncmp(line, "VERSION ", 8) == 0) {
+        snprintf(installer_version, sizeof(installer_version), "%.30s", line + 8);
+        update_version();
+    } else if (strncmp(line, "MCU ", 4) == 0) {
+        sscanf(line + 4, "%47s %47s", mcu_drive, mcu_boards);
+        update_version();
     }
     if (strncmp(line, "STAGE ", 6) == 0) set_status(line + 6);
     else if (strncmp(line, "ERROR ", 6) == 0) set_status_error(line + 6);
@@ -514,6 +562,7 @@ static void poll_child(void)
     close(child_fd);
     child_fd = -1;
     child_pid = -1;
+    sync_log_files();
     if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
         show_page(PAGE_ERROR);
     } else if (strcmp(current_action, "check") == 0) {
@@ -595,8 +644,74 @@ static void build_log_panel(lv_obj_t *screen, uint32_t width, uint32_t height)
     lv_label_set_text_static(log_label, log_text);
 }
 
+/* The Creator 5 panel is a portrait framebuffer; the UI is drawn landscape
+ * and rotated (display_rotate: 1).
+ * OC_DISPLAY_ROTATE=0..3 overrides it. */
+static lv_disp_rot_t display_rotation(uint32_t width, uint32_t height)
+{
+    const char *env = getenv("OC_DISPLAY_ROTATE");
+    if (env && env[0] >= '0' && env[0] <= '3' && env[1] == '\0')
+        return (lv_disp_rot_t)(env[0] - '0');
+    return width < height ? LV_DISP_ROT_90 : LV_DISP_ROT_NONE;
+}
+
+/* Registers the framebuffer and returns the (rotated) UI size. */
+static void register_display(uint32_t *width, uint32_t *height)
+{
+    static lv_disp_draw_buf_t draw_buf;
+    static lv_disp_drv_t display;
+    uint32_t longest = *width > *height ? *width : *height;
+    lv_color_t *buffer = calloc(longest * 32, sizeof(lv_color_t));
+    if (!buffer) exit(1);
+    lv_disp_draw_buf_init(&draw_buf, buffer, NULL, longest * 32);
+    lv_disp_drv_init(&display);
+    display.draw_buf = &draw_buf;
+    display.flush_cb = platform_flush;
+    display.hor_res = *width;
+    display.ver_res = *height;
+    display.rotated = display_rotation(*width, *height);
+    display.sw_rotate = display.rotated != LV_DISP_ROT_NONE;
+    lv_disp_drv_register(&display);
+    *width = lv_disp_get_hor_res(NULL);
+    *height = lv_disp_get_ver_res(NULL);
+}
+
+#ifndef OC_DEMO
+/* Draws the logo (and an optional status line) to the framebuffer and
+ * exits; runFirmwareExe.sh shows it while the printer gets ready. */
+static int show_splash(const char *message)
+{
+    lv_init();
+    uint32_t width = 800, height = 480;
+    if (platform_init("/dev/fb0", NULL, &width, &height) != 0) {
+        fprintf(stderr, "framebuffer unavailable\n");
+        return 1;
+    }
+    register_display(&width, &height);
+    lv_obj_t *screen = lv_scr_act();
+    lv_obj_set_style_bg_color(screen, lv_color_hex(OC_COLOR_BG), 0);
+    lv_obj_t *logo = lv_img_create(screen);
+    lv_img_set_src(logo, &oc_logo_large);
+    lv_obj_set_style_img_recolor(logo, lv_color_hex(OC_COLOR_LOGO), 0);
+    lv_obj_set_style_img_recolor_opa(logo, LV_OPA_COVER, 0);
+    lv_obj_align(logo, LV_ALIGN_CENTER, 0, message ? -24 : 0);
+    if (message) {
+        lv_obj_t *label = lv_label_create(screen);
+        lv_label_set_text(label, message);
+        lv_obj_set_style_text_color(label, lv_color_hex(OC_COLOR_MUTED), 0);
+        lv_obj_align_to(label, logo, LV_ALIGN_OUT_BOTTOM_MID, 0, 24);
+    }
+    lv_refr_now(NULL);
+    return 0;
+}
+#endif
+
 int main(int argc, char **argv)
 {
+#ifndef OC_DEMO
+    if (argc >= 2 && strcmp(argv[1], "--splash") == 0)
+        return show_splash(argc > 2 ? argv[2] : NULL);
+#endif
 #ifdef OC_DEMO
     (void)argc;
     (void)argv;
@@ -619,17 +734,7 @@ int main(int argc, char **argv)
         fprintf(stderr, "framebuffer or touch input unavailable\n");
         return 1;
     }
-    lv_color_t *buffer = calloc(width * 32, sizeof(lv_color_t));
-    if (!buffer) return 1;
-    lv_disp_draw_buf_t draw_buf;
-    lv_disp_draw_buf_init(&draw_buf, buffer, NULL, width * 32);
-    lv_disp_drv_t display;
-    lv_disp_drv_init(&display);
-    display.draw_buf = &draw_buf;
-    display.flush_cb = platform_flush;
-    display.hor_res = width;
-    display.ver_res = height;
-    lv_disp_drv_register(&display);
+    register_display(&width, &height);
     lv_indev_drv_t input;
     lv_indev_drv_init(&input);
     input.type = LV_INDEV_TYPE_POINTER;
@@ -722,6 +827,14 @@ int main(int argc, char **argv)
     lv_obj_set_width(status_label, width - 60);
     lv_label_set_long_mode(status_label, LV_LABEL_LONG_WRAP);
     lv_obj_align(status_label, LV_ALIGN_BOTTOM_LEFT, 30, -125);
+
+    version_label = lv_label_create(screen);
+    lv_obj_set_width(version_label, width - 40);
+    lv_label_set_long_mode(version_label, LV_LABEL_LONG_DOT);
+    lv_obj_set_style_text_align(version_label, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_style_text_color(version_label, lv_color_hex(OC_COLOR_MUTED), 0);
+    lv_obj_align(version_label, LV_ALIGN_BOTTOM_MID, 0, -4);
+    update_version();
 
     build_log_panel(screen, width, height);
 
