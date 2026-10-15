@@ -14,11 +14,11 @@
 #include "logo.h"
 #include "platform.h"
 
-enum page { PAGE_CHECK, PAGE_ROOTFS, PAGE_MODE, PAGE_WEB, PAGE_TOUCHSCREEN, PAGE_READY,
-            PAGE_RUNNING, PAGE_REBOOT, PAGE_DONE, PAGE_ERROR, PAGE_RESTORE };
+enum page { PAGE_CHECK, PAGE_MODE, PAGE_WEB, PAGE_TOUCHSCREEN, PAGE_READY,
+            PAGE_RUNNING, PAGE_DONE, PAGE_ERROR, PAGE_RESTORE, PAGE_KERNEL };
 static enum page page_now;
-static const char *rootfs_path, *payload_path, *backup_path, *script_path;
-static const char *mode = "soc", *web = "mainsail";
+static const char *payload_path, *backup_path, *script_path;
+static const char *mode = "soc", *web = "fluidd";
 static const char *touchscreen = "yes";
 /* NULL for a real install; otherwise the install runs with
  * OC_DEMO_ROOT set to this path, so every payload script writes under
@@ -37,8 +37,9 @@ static int child_fd = -1;
 static char linebuf[1024];
 static size_t line_len;
 static char current_action[16];
-static bool rootfs_current;
-static uint64_t reboot_at, running_since, splash_until;
+static bool kernel_ok;
+static char kernel_text[160] = "unknown";
+static uint64_t running_since, splash_until;
 static char machine[32] = "unknown";
 static bool model_known;
 static char backup_found[512];
@@ -63,14 +64,13 @@ static FILE *log_file;
 static void step_info(enum page p, int *step, int *total)
 {
     bool soc = strcmp(mode, "soc") == 0;
-    *total = soc ? 5 : 3;
+    *total = soc ? 5 : 4;
     switch (p) {
     case PAGE_MODE:     *step = 1; break;
     case PAGE_WEB:        *step = 2; break;
-    case PAGE_TOUCHSCREEN: *step = 3; break;
-    case PAGE_READY:    *step = soc ? 4 : 2; break;
+    case PAGE_TOUCHSCREEN: *step = soc ? 3 : 2; break;
+    case PAGE_READY:    *step = soc ? 4 : 3; break;
     case PAGE_RUNNING:
-    case PAGE_REBOOT:
     case PAGE_DONE:
     case PAGE_ERROR:    *step = *total; break;
     default:            *step = 0; break;
@@ -81,9 +81,8 @@ static const char *page_icon(enum page p)
 {
     switch (p) {
     case PAGE_DONE:  return LV_SYMBOL_OK;
-    case PAGE_ERROR: return LV_SYMBOL_WARNING;
-    case PAGE_ROOTFS:
-    case PAGE_REBOOT: return LV_SYMBOL_REFRESH;
+    case PAGE_ERROR:
+    case PAGE_KERNEL: return LV_SYMBOL_WARNING;
     case PAGE_RUNNING: return LV_SYMBOL_DOWNLOAD;
     case PAGE_MODE:  return LV_SYMBOL_SETTINGS;
     case PAGE_WEB:
@@ -199,7 +198,7 @@ static void start_action(const char *action)
         dup2(fds[1], STDOUT_FILENO);
         dup2(fds[1], STDERR_FILENO);
         close(fds[1]);
-        execl("/bin/sh", "sh", script_path, action, rootfs_path,
+        execl("/bin/sh", "sh", script_path, action,
               payload_path, backup_path, mode, web, touchscreen, (char *)NULL);
         _exit(127);
     }
@@ -243,10 +242,9 @@ static void request_reboot(void)
 static void action_button(lv_event_t *event)
 {
     const char *action = lv_event_get_user_data(event);
-    if (strcmp(action, "rootfs") == 0) start_action("rootfs");
-    else if (strcmp(action, "soc") == 0) { mode = "soc"; show_page(PAGE_WEB); }
+    if (strcmp(action, "soc") == 0) { mode = "soc"; show_page(PAGE_WEB); }
     else if (strcmp(action, "tunnel") == 0) {
-        mode = "tunnel"; web = "none"; touchscreen = "no"; show_page(PAGE_READY);
+        mode = "tunnel"; web = "none"; show_page(PAGE_TOUCHSCREEN);
     } else if (strcmp(action, "mainsail") == 0 || strcmp(action, "fluidd") == 0) {
         web = action; show_page(PAGE_TOUCHSCREEN);
     } else if (strcmp(action, "touch-yes") == 0) {
@@ -289,12 +287,12 @@ static lv_obj_t *make_button(lv_obj_t *parent, const char *text, const char *act
     return button;
 }
 
-/* "Back", "No" and "Restore" are secondary; every other action is the
+/* "Back", "No", "Restore" and "Mainsail" are secondary; every other action is the
  * page's primary (forward-moving) action. */
 static void add_button(const char *text, const char *action)
 {
     bool secondary = strcmp(action, "back") == 0 || strcmp(action, "touch-no") == 0 ||
-                     strcmp(action, "restore-confirm") == 0;
+                     strcmp(action, "restore-confirm") == 0 || strcmp(action, "mainsail") == 0;
     make_button(button_row, text, action, !secondary, 220, 58);
 }
 
@@ -333,13 +331,21 @@ static void show_page(enum page next)
     switch (next) {
     case PAGE_CHECK:
         set_title(next, "OpenCreator installer");
-        lv_label_set_text(body_label, "Checking the printer and the supplied root filesystem...");
+        lv_label_set_text(body_label, "Checking the printer...");
         lv_obj_clear_flag(splash_logo, LV_OBJ_FLAG_HIDDEN);
         break;
-    case PAGE_ROOTFS:
-        set_title(next, "Root filesystem update");
-        lv_label_set_text(body_label, "A different squashfs was supplied. The vendor OTA path will update the inactive rootfs slot, then reboot. Do not interrupt power.");
-        add_button("Update and reboot", "rootfs");
+    case PAGE_KERNEL:
+        set_title(next, "Unsupported FlashForge firmware");
+        {
+            static char buf[480];
+            snprintf(buf, sizeof(buf),
+                     "This printer's kernel package is %s. OpenCreator needs kernel package "
+                     "2.0.1 to 2.0.7 to enable legacy NaN for Entware (FlashForge 1.9.9 has 2.0.7). "
+                     "Install the stock 1.9.9 update from FlashForge, then run this installer again. "
+                     "Nothing has been changed.", kernel_text);
+            lv_label_set_text(body_label, buf);
+        }
+        add_button("Check again", "restart");
         break;
     case PAGE_MODE:
         set_title(next, "Where should Klipper run?");
@@ -355,12 +361,15 @@ static void show_page(enum page next)
     case PAGE_WEB:
         set_title(next, "Choose web interface");
         lv_label_set_text(body_label, "This selection is for the on-printer installation.");
+        add_button("Fluidd (recommended)", "fluidd");
         add_button("Mainsail", "mainsail");
-        add_button("Fluidd", "fluidd");
         break;
     case PAGE_TOUCHSCREEN:
         set_title(next, "Install touchscreen UI?");
-        lv_label_set_text(body_label, "GrumpyScreen is recommended for on-printer control. Tunnel installs skip it.");
+        lv_label_set_text(body_label, strcmp(mode, "soc") == 0
+            ? "GrumpyScreen is recommended for on-printer control."
+            : "GrumpyScreen runs on the printer's screen and controls Klipper on your SBC. "
+              "After installing, point its config in /usr/data/grumpyscreen/ at the SBC.");
         add_button("Yes (recommended)", "touch-yes");
         add_button("No", "touch-no");
         break;
@@ -376,17 +385,16 @@ static void show_page(enum page next)
               OC_DEMO_INSTALL_ROOT " instead of the real system, so you can "
               "inspect exactly what it does first."
 #else
-            : "Existing program and config directories are backed up first."
+            : "Existing program and config directories are backed up first. The printer "
+              "needs internet: Entware and everything else is downloaded during install."
 #endif
         );
         lv_obj_clear_flag(summary_box, LV_OBJ_FLAG_HIDDEN);
         add_summary_row("Printer", model_name());
         add_summary_row("Mode", strcmp(mode, "soc") == 0 ? "Printer SoC" : "Tunneled SBC");
-        if (strcmp(mode, "soc") == 0) {
-            add_summary_row("Web UI", web);
-            add_summary_row("Touchscreen",
-                             strcmp(touchscreen, "yes") == 0 ? "GrumpyScreen" : "None");
-        }
+        if (strcmp(mode, "soc") == 0) add_summary_row("Web UI", web);
+        add_summary_row("Touchscreen",
+                         strcmp(touchscreen, "yes") == 0 ? "GrumpyScreen" : "None");
         add_button("Back", "back");
 #ifdef OC_DEMO
         add_button("Demo install", "demo-install");
@@ -415,11 +423,6 @@ static void show_page(enum page next)
         lv_obj_clear_flag(spinner, LV_OBJ_FLAG_HIDDEN);
         lv_obj_clear_flag(progress_bar, LV_OBJ_FLAG_HIDDEN);
         break;
-    case PAGE_REBOOT:
-        set_title(next, "Rootfs update staged");
-        lv_label_set_text(body_label, "Restarting in five seconds. Reopen the installer after boot; it will skip the completed rootfs step.");
-        reboot_at = now_ms() + 5000;
-        break;
     case PAGE_DONE:
         if (restoring) {
             set_title(next, "Restore complete");
@@ -431,6 +434,13 @@ static void show_page(enum page next)
                   "have written at " OC_DEMO_INSTALL_ROOT "."
                 : "Reboot to start OpenCreator. Unplug the installer USB drive once you're "
                   "done -- leaving it plugged in risks it being picked up again on the next boot.");
+            if (strcmp(mode, "tunnel") == 0 && strcmp(touchscreen, "yes") == 0) {
+                lv_label_set_text_static(notice_label,
+                    "Touchscreen: edit /usr/data/grumpyscreen/grumpyscreen.cfg and set "
+                    "host under [moonraker] to your SBC's IP address, then reboot. "
+                    "Until then the screen can't reach Klipper.");
+                lv_obj_clear_flag(notice_label, LV_OBJ_FLAG_HIDDEN);
+            }
         }
         if (!demo_root) add_button(LV_SYMBOL_POWER "  Reboot now", "reboot");
         break;
@@ -447,8 +457,11 @@ static void show_page(enum page next)
 static void process_line(char *line)
 {
     log_line(line);
-    if (strncmp(line, "STATE CURRENT", 13) == 0) rootfs_current = true;
-    if (strncmp(line, "STATE NEEDED", 12) == 0) rootfs_current = false;
+    if (strncmp(line, "KERNEL ", 7) == 0) {
+        kernel_ok = strncmp(line + 7, "OK ", 3) == 0;
+        const char *ver = strchr(line + 7, ' ');
+        snprintf(kernel_text, sizeof(kernel_text), "%.150s", ver ? ver + 1 : "unknown");
+    }
     if (strncmp(line, "STAGE ", 6) == 0) set_status(line + 6);
     else if (strncmp(line, "ERROR ", 6) == 0) set_status_error(line + 6);
     else if (strncmp(line, "MODEL ", 6) == 0) {
@@ -504,9 +517,7 @@ static void poll_child(void)
     if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
         show_page(PAGE_ERROR);
     } else if (strcmp(current_action, "check") == 0) {
-        show_page(rootfs_current ? PAGE_MODE : PAGE_ROOTFS);
-    } else if (strcmp(current_action, "rootfs") == 0) {
-        show_page(PAGE_REBOOT);
+        show_page(kernel_ok ? PAGE_MODE : PAGE_KERNEL);
     } else {
         show_page(PAGE_DONE);
     }
@@ -519,6 +530,32 @@ static void update_elapsed(void)
     snprintf(buf, sizeof(buf), "Elapsed %u:%02u", secs / 60u, secs % 60u);
     if (strcmp(lv_label_get_text(step_label), buf) != 0)
         lv_label_set_text(step_label, buf);
+}
+
+/* The touchscreen (goodix-ts) is not always event0; OC_TOUCH_DEV overrides. */
+static const char *touch_device(void)
+{
+    static char path[64] = "/dev/input/event0";
+    const char *env = getenv("OC_TOUCH_DEV");
+    if (env && env[0]) return env;
+    FILE *devices = fopen("/proc/bus/input/devices", "r");
+    if (!devices) return path;
+    char line[256];
+    bool touch = false;
+    while (fgets(line, sizeof(line), devices)) {
+        if (strncmp(line, "N: Name=", 8) == 0) {
+            touch = strstr(line, "goodix") || strstr(line, "ouch");
+        } else if (touch && strncmp(line, "H: Handlers=", 12) == 0) {
+            const char *event = strstr(line, "event");
+            int n;
+            if (event && sscanf(event, "event%d", &n) == 1) {
+                snprintf(path, sizeof(path), "/dev/input/event%d", n);
+                break;
+            }
+        }
+    }
+    fclose(devices);
+    return path;
 }
 
 static void build_log_panel(lv_obj_t *screen, uint32_t width, uint32_t height)
@@ -563,24 +600,22 @@ int main(int argc, char **argv)
 #ifdef OC_DEMO
     (void)argc;
     (void)argv;
-    rootfs_path = "-";
     payload_path = "payload-template";
     backup_path = "/tmp/opencreator-installer-demo";
     script_path = "scripts/demo.sh";
 #else
-    if (argc != 5) {
-        fprintf(stderr, "usage: %s ROOTFS.squashfs PAYLOAD_DIR BACKUP_DIR INSTALL_SCRIPT\n", argv[0]);
+    if (argc != 4) {
+        fprintf(stderr, "usage: %s PAYLOAD_DIR BACKUP_DIR INSTALL_SCRIPT\n", argv[0]);
         return 2;
     }
-    rootfs_path = argv[1];
-    payload_path = argv[2];
-    backup_path = argv[3];
-    script_path = argv[4];
+    payload_path = argv[1];
+    backup_path = argv[2];
+    script_path = argv[3];
 #endif
     open_log_file();
     lv_init();
     uint32_t width = 800, height = 480;
-    if (platform_init("/dev/fb0", "/dev/input/event0", &width, &height) != 0) {
+    if (platform_init("/dev/fb0", touch_device(), &width, &height) != 0) {
         fprintf(stderr, "framebuffer or touch input unavailable\n");
         return 1;
     }
@@ -701,17 +736,6 @@ int main(int argc, char **argv)
         poll_child();
         if (page_now == PAGE_RUNNING) update_elapsed();
         lv_timer_handler();
-        if (page_now == PAGE_REBOOT && now >= reboot_at) {
-#ifdef OC_DEMO
-            show_page(PAGE_MODE);
-            set_status("Demo reboot complete; no host reboot was performed");
-#else
-            sync();
-            execl("/sbin/reboot", "reboot", (char *)NULL);
-            show_page(PAGE_ERROR);
-            set_status("Automatic reboot failed; reboot manually");
-#endif
-        }
         struct timespec nap = { .tv_sec = 0, .tv_nsec = 20000000 };
         nanosleep(&nap, NULL);
     }
