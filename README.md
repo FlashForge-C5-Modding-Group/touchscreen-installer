@@ -13,7 +13,8 @@ The flow is:
    install the recommended GrumpyScreen touchscreen. With tunnel mode, the
    finish page says to set `host` under `[moonraker]` in
    `/usr/data/grumpyscreen/grumpyscreen.cfg` to the SBC.
-4. Back up `/usr/prog/PROGRAM`, `/usr/prog/moonraker`, `/usr/data/opencreator`,
+4. Back up `/usr/prog/PROGRAM/software/firmwareExe` (the only file changed in
+   FlashForge's program folder), `/usr/prog/moonraker`, `/usr/data/opencreator`,
    `/usr/data/mainsail`, `/usr/data/fluidd`, `/usr/data/nginx` and
    `/usr/prog/c5-tunnel-socat` before running any install script.
 5. Run the ordered `.sh` files from `payload/installers/soc` or
@@ -205,8 +206,8 @@ always uses `scripts/demo.sh`, so it cannot invoke the real install backend.
 `../ingenic-mips-toolchain-r6.0.0/`, or point `INGENIC_TOOLCHAIN` at the
 extracted `mips-xburst2-linux-toolchain-r6.0.0` directory. It builds with
 `-mnan=2008` (no legacy NaN, matching the stock userland) and links
-statically. `readelf -h` should list `nan2008, o32, mips32r2`. The app is
-not yet claimed to be hardware-tested.
+statically. `readelf -h` should list `nan2008, o32, mips32r2`. The app has
+been tested end to end on a printer.
 
 ## Payload layout
 

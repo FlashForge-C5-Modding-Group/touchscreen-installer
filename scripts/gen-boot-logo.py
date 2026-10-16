@@ -15,7 +15,6 @@ from PIL import Image, ImageChops, ImageDraw, ImageFont
 WIDTH, HEIGHT = 800, 480
 SS = 4
 BACKGROUND = (0x15, 0x1A, 0x22)
-GRADIENT = ((0xFF, 0x6A, 0x2B), (0xFF, 0xB0, 0x2E))
 TEXT = (0xF5, 0xF2, 0xEC)
 LOGO_WIDTH = 380
 FONTS = (
@@ -49,19 +48,6 @@ def logo_mask(vb, polys, width):
     return mask.resize((width, height), Image.LANCZOS)
 
 
-def gradient(size):
-    w, h = size
-    image = Image.new("RGB", size)
-    pixels = image.load()
-    (r0, g0, b0), (r1, g1, b1) = GRADIENT
-    for y in range(h):
-        for x in range(w):
-            t = (x / max(w - 1, 1) + y / max(h - 1, 1)) / 2
-            pixels[x, y] = (round(r0 + (r1 - r0) * t), round(g0 + (g1 - g0) * t),
-                            round(b0 + (b1 - b0) * t))
-    return image
-
-
 def main():
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     svg_path = sys.argv[1] if len(sys.argv) > 1 else os.path.join(root, "opencreator-oc-white.svg")
@@ -79,7 +65,8 @@ def main():
         text_w, text_h = right - left, bottom - top
     gap = 34 if font else 0
     top_y = (HEIGHT - mask.height - gap - text_h) // 2
-    image.paste(gradient(mask.size), ((WIDTH - mask.width) // 2, top_y), mask)
+    image.paste(TEXT, ((WIDTH - mask.width) // 2, top_y,
+                       (WIDTH + mask.width) // 2, top_y + mask.height), mask)
     if font:
         ImageDraw.Draw(image).text(
             ((WIDTH - text_w) // 2 - left, top_y + mask.height + gap - top),

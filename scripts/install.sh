@@ -34,9 +34,14 @@ STATE_DIR=${OC_STATE_DIR:-"$DEMO_ROOT/usr/data/opencreator"}
 INSTALL_STATE=$STATE_DIR/install.json
 INSTALLER_VERSION=0.3.0
 MIN_FREE_KB=${OC_MIN_FREE_KB:-262144}
-BACKUP_FOLDERS="usr/prog/PROGRAM usr/prog/moonraker usr/data/opencreator
+BACKUP_FOLDERS="usr/prog/PROGRAM/software/firmwareExe usr/prog/moonraker usr/data/opencreator
 usr/data/mainsail usr/data/fluidd usr/data/nginx usr/prog/c5-tunnel-socat
 usr/prog/logo.jpeg usr/prog/app_startup.sh"
+
+# Other custom firmware OpenCreator replaces: backed up, then removed.
+FOREIGN_FOLDERS="usr/data/zmod usr/data/anvil"
+# A new install needs this much free on /usr/data (updates and config changes don't).
+NEW_INSTALL_MIN_KB=${OC_NEW_INSTALL_MIN_KB:-2097152}
 
 stage() { printf 'STAGE %s\n' "$*"; }
 warn() { printf 'WARN %s\n' "$*"; }
@@ -106,6 +111,55 @@ preflight() {
         warn "No internet: the install downloads Entware and the rest, connect Wi-Fi first"
     fi
 }
+# FlashForge firmware version: app_startup.sh runs the highest numbered
+# folder in software/. OC_FF_VERSION overrides it; demo installs count as 1.9.9.
+detect_ff_version() {
+    FF_VERSION=${OC_FF_VERSION:-}
+    [ -z "$FF_VERSION" ] || return 0
+    for dir in "$DEMO_ROOT"/usr/prog/PROGRAM/software/[0-9]*/; do
+        [ -d "$dir" ] && basename "$dir"
+    done | sort -t. -k1,1n -k2,2n -k3,3n | tail -n 1 > "${TMPDIR:-/tmp}/oc-ffver.$$"
+    FF_VERSION=$(cat "${TMPDIR:-/tmp}/oc-ffver.$$"); rm -f "${TMPDIR:-/tmp}/oc-ffver.$$"
+    [ -n "$FF_VERSION" ] || { [ -n "$DEMO_ROOT" ] && FF_VERSION=1.9.9; } || FF_VERSION=unknown
+}
+# Tunneled needs FlashForge 1.9.9; an undetectable version isn't blocked.
+tunnel_supported() {
+    detect_ff_version
+    [ "$FF_VERSION" = unknown ] && return 0
+    printf '%s\n' "$FF_VERSION" | awk -F. '{exit !($1 * 1000000 + $2 * 1000 + $3 >= 1009009)}'
+}
+foreign_name() {
+    case "$1" in
+        usr/data/zmod) echo ZMod ;;
+        usr/data/anvil) echo Reforge ;;
+    esac
+}
+# Free KB on /usr/data, counting what removing ZMod/Reforge frees up.
+usable_kb() {
+    data_dir=$DEMO_ROOT/usr/data
+    [ -d "$data_dir" ] || data_dir=${DEMO_ROOT:-/}
+    kb=$(free_kb "$data_dir")
+    [ -n "$kb" ] || return 1
+    for folder in $FOREIGN_FOLDERS; do
+        [ -d "$DEMO_ROOT/$folder" ] || continue
+        used=$(du -sk "$DEMO_ROOT/$folder" 2>/dev/null | awk '{print $1}')
+        kb=$((kb + ${used:-0}))
+    done
+    echo "$kb"
+}
+# Only a new install (no install record) is held to NEW_INSTALL_MIN_KB.
+space_ok() {
+    [ -f "$INSTALL_STATE" ] && return 0
+    usable=$(usable_kb) || return 0
+    [ "$usable" -ge "$NEW_INSTALL_MIN_KB" ]
+}
+remove_foreign() {
+    for folder in $FOREIGN_FOLDERS; do
+        [ -d "$DEMO_ROOT/$folder" ] || continue
+        stage "Removing the previous $(foreign_name "$folder") install (/$folder)"
+        rm -rf "$DEMO_ROOT/$folder" || die "could not remove /$folder"
+    done
+}
 latest_backup() {
     LATEST_BACKUP=
     if [ -f "$INSTALL_STATE" ]; then
@@ -152,7 +206,25 @@ check() {
         stage "No prior OpenCreator install record"
     fi
     preflight
+    for folder in $FOREIGN_FOLDERS; do
+        [ ! -d "$DEMO_ROOT/$folder" ] ||
+            warn "Previous $(foreign_name "$folder") install detected! This will be backed up and removed!"
+    done
+    detect_ff_version
+    printf 'FIRMWARE %s\n' "$FF_VERSION"
+    tunnel_supported ||
+        stage "FlashForge firmware $FF_VERSION: Tunneled needs 1.9.9"
+    if ! space_ok; then
+        printf 'SPACE LOW %s\n' "$(($(usable_kb) / 1024))"
+        warn "Only $(($(usable_kb) / 1024)) MB free on the printer (/usr/data). A new install needs 2 GB free: free up space first. Updates and config changes still work."
+    fi
     if latest_backup; then printf 'BACKUP %s\n' "$LATEST_BACKUP"; fi
+    # The LoopScript launcher is a shell script; stock firmwareExe is ELF.
+    fe=$DEMO_ROOT/usr/prog/PROGRAM/software/firmwareExe
+    if [ -f "$fe" ] && [ "$(dd if="$fe" bs=1 skip=1 count=3 2>/dev/null)" != ELF ] &&
+        stock=$(stock_firmware_exe); then
+        printf 'STOCK %s\n' "$stock"
+    fi
 }
 backup_folders() {
     [ -n "$DEMO_ROOT" ] || [ "$(id -u)" -eq 0 ] || die "backup requires root"
@@ -175,7 +247,7 @@ backup_folders() {
     target=$BACKUP_ROOT/opencreator-$stamp-$$
     mkdir "$target" || die "cannot create backup directory"
     : > "$target/absent.list"
-    for folder in $BACKUP_FOLDERS; do
+    for folder in ${1:-$BACKUP_FOLDERS $FOREIGN_FOLDERS}; do
         if [ -e "$DEMO_ROOT/$folder" ]; then
             name=$(printf '%s' "$folder" | tr / _)
             stage "Backing up /$folder"
@@ -199,6 +271,8 @@ install_payload() {
     case "$WEB" in mainsail|fluidd|none) ;; *) die "invalid web UI" ;; esac
     case "$TOUCHSCREEN" in yes|no) ;; *) die "invalid touchscreen choice" ;; esac
     [ "$MODE" != tunnel ] || [ "$WEB" = none ] || die "tunnel mode must skip web UI"
+    [ "$MODE" != tunnel ] || tunnel_supported ||
+        die "Tunneled needs FlashForge firmware 1.9.9 (this printer has $FF_VERSION). Update the printer to 1.9.9 first; nothing was changed"
     [ "$MODE" != soc ] || [ "$WEB" != none ] || die "SoC mode requires a web UI"
     detect_model || die "unsupported or undetected printer model"
     stage "Detected $MACHINE (PID $PID)"
@@ -208,6 +282,7 @@ install_payload() {
     done
     [ -z "$missing_tools" ] || die "the printer is missing:$missing_tools; nothing was changed"
     kernel_supported || die "unsupported FlashForge kernel package $KERNEL_PACKAGE (legacy NaN address unknown)"
+    space_ok || die "only $(($(usable_kb) / 1024)) MB free on /usr/data; a new install needs $((NEW_INSTALL_MIN_KB / 1024)) MB. Nothing was changed"
     stage "Kernel package $KERNEL_PACKAGE"
     scripts=$PAYLOAD/installers/$MODE
     [ -d "$scripts" ] || die "install scripts missing: $scripts"
@@ -223,6 +298,12 @@ install_payload() {
     progress 0 "$total"
     if [ "${OC_SKIP_BACKUP:-0}" = 1 ]; then
         stage "Skipping the backup (Install without backup)"
+        # ZMod/Reforge are still archived before they are removed.
+        foreign=
+        for folder in $FOREIGN_FOLDERS; do
+            [ ! -d "$DEMO_ROOT/$folder" ] || foreign="$foreign $folder"
+        done
+        [ -z "$foreign" ] || backup_folders "$foreign"
         # Payload steps still keep small "previous" copies here.
         BACKUP_TARGET=$STATE_DIR/no-backup
         mkdir -p "$BACKUP_TARGET"
@@ -231,6 +312,7 @@ install_payload() {
         backup_folders
         RECORDED_BACKUP=$BACKUP_TARGET
     fi
+    remove_foreign
     n=1
     progress "$n" "$total"
     for script in "$scripts"/*.sh; do
@@ -322,6 +404,8 @@ reconfigure() {
     case "$WEB" in mainsail|fluidd|none) ;; *) die "invalid web UI" ;; esac
     case "$TOUCHSCREEN" in yes|no) ;; *) die "invalid touchscreen choice" ;; esac
     [ "$MODE" != tunnel ] || [ "$WEB" = none ] || die "tunnel mode must skip web UI"
+    [ "$MODE" != tunnel ] || tunnel_supported ||
+        die "Tunneled needs FlashForge firmware 1.9.9 (this printer has $FF_VERSION). Update the printer to 1.9.9 first; nothing was changed"
     [ "$MODE" != soc ] || [ "$WEB" != none ] || die "SoC mode requires a web UI"
     [ -f "$INSTALL_STATE" ] || die "no OpenCreator install record; use Recovery instead"
     detect_model || die "unsupported or undetected printer model"
@@ -394,8 +478,42 @@ reconfigure() {
     stage "Changes applied; reboot to start with them"
 }
 
+# Rollback to stock: only FlashForge's firmwareExe goes back. Everything
+# OpenCreator runs is started by the LoopScript firmwareExe, so the printer
+# then boots as stock; OpenCreator's files stay on disk for a reinstall.
+stock_firmware_exe() {
+    versioned=$(ls -d "$DEMO_ROOT"/usr/prog/PROGRAM/software/[0-9]*/firmwareExe 2>/dev/null | tail -n 1)
+    for f in "$STATE_DIR/firmwareExe.stock" $versioned \
+        "$DEMO_ROOT/usr/prog/c5-tunnel-socat/firmwareExe.previous"; do
+        if [ -f "$f" ] && [ "$(dd if="$f" bs=1 skip=1 count=3 2>/dev/null)" = ELF ]; then
+            echo "$f"
+            return 0
+        fi
+    done
+    return 1
+}
+rollback_stock() {
+    [ -n "$DEMO_ROOT" ] || [ "$(id -u)" -eq 0 ] || die "rollback requires root"
+    FE=$DEMO_ROOT/usr/prog/PROGRAM/software/firmwareExe
+    src=$(stock_firmware_exe) || die "no stock firmwareExe found on the printer; nothing was changed"
+    progress 0 2
+    stage "Restoring FlashForge's firmwareExe from $src"
+    cp "$src" "$FE.new" || die "could not copy $src"
+    chmod 755 "$FE.new"
+    sync
+    mv "$FE.new" "$FE" || die "could not replace firmwareExe"
+    sync
+    progress 1 2
+    # Without the record the next installer run offers a fresh install.
+    [ ! -f "$INSTALL_STATE" ] || mv "$INSTALL_STATE" "$INSTALL_STATE.rolled-back"
+    sync
+    progress 2 2
+    stage "Rolled back to stock; reboot to start FlashForge's firmware"
+}
+
 case "$ACTION" in
     check) check ;;
+    rollback) rollback_stock ;;
     install) install_payload ;;
     reconfigure) reconfigure ;;
     restore) restore_backup ;;

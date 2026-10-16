@@ -4,7 +4,7 @@
 # running it. Shared by both install modes (dispatched from
 # installers/soc/95-flash-mcu-firmware.sh and
 # installers/tunnel/95-flash-mcu-firmware.sh) since both depend on
-# klipper-c5 MCU firmware already being flashed, regardless of where
+# Kalico MCU firmware already being flashed, regardless of where
 # Klipper itself ends up running.
 #
 # Expects exactly one package at $OC_PAYLOAD/mcu-firmware/*.tgz with a

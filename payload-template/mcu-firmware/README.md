@@ -12,7 +12,7 @@ package here:
 
 This is the encrypted FlashForge update format built by
 [`creator-5-update-creator`](https://github.com/FlashForge-C5-Modding-Group/creator-5-update-creator),
-with the stock MCU images replaced by klipper-c5 builds
+with the stock MCU images replaced by Kalico builds
 (`MCU_MODE=replacement`). The script decrypts it with the known
 Creator 5 Pro update password, extracts the inner `control-*.tar.xz`,
 and flashes each board with the bundled `IAPCommand`/`ISPCommand`

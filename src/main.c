@@ -16,7 +16,7 @@
 
 enum page { PAGE_CHECK, PAGE_MODE, PAGE_WEB, PAGE_TOUCHSCREEN, PAGE_READY,
             PAGE_RUNNING, PAGE_DONE, PAGE_ERROR, PAGE_RESTORE, PAGE_KERNEL,
-            PAGE_INSTALLED };
+            PAGE_INSTALLED, PAGE_ROLLBACK };
 static enum page page_now;
 static const char *payload_path, *backup_path, *script_path;
 static const char *mode = "soc", *web = "fluidd";
@@ -47,11 +47,17 @@ static uint64_t running_since, splash_until;
 static char machine[32] = "unknown";
 static bool model_known;
 static char backup_found[512];
+static char stock_found[512];
 /* From the install record. When it was made by this installer version,
  * the start page offers Recovery (the full setup) or Update Configs (only
  * what changed, via the "reconfigure" action). */
 static char prev_version[32], prev_mode[16], prev_web[16], prev_touch[8];
 static bool installed_same, update_configs;
+static bool space_low;
+/* FlashForge firmware version; Tunneled needs 1.9.9 or newer. */
+static char ff_version[32] = "unknown";
+static bool tunnel_blocked;
+static int space_mb;
 static char warn_text[1024];
 static char log_text[12288];
 static size_t log_len;
@@ -97,7 +103,8 @@ static const char *page_icon(enum page p)
     case PAGE_WEB:
     case PAGE_TOUCHSCREEN: return LV_SYMBOL_EDIT;
     case PAGE_READY: return LV_SYMBOL_PLAY;
-    case PAGE_RESTORE: return LV_SYMBOL_LOOP;
+    case PAGE_RESTORE:
+    case PAGE_ROLLBACK: return LV_SYMBOL_LOOP;
     default:         return LV_SYMBOL_HOME;
     }
 }
@@ -256,7 +263,9 @@ static void start_action(const char *action)
         warn_text[0] = '\0';
         splash_until = now_ms() + 1500;
         backup_found[0] = '\0';
-        installed_same = update_configs = false;
+        stock_found[0] = '\0';
+        installed_same = update_configs = space_low = tunnel_blocked = false;
+        prev_version[0] = '\0';
     } else {
         lv_bar_set_range(progress_bar, 0, 1);
         lv_bar_set_value(progress_bar, 0, LV_ANIM_OFF);
@@ -307,6 +316,10 @@ static void action_button(lv_event_t *event)
     } else if (strcmp(action, "home") == 0) show_page(PAGE_INSTALLED);
     else if (strcmp(action, "back") == 0) show_page(PAGE_MODE);
     else if (strcmp(action, "restore-confirm") == 0) show_page(PAGE_RESTORE);
+    else if (strcmp(action, "rollback-confirm") == 0) show_page(PAGE_ROLLBACK);
+    else if (strcmp(action, "rollback") == 0) { demo_root = NULL; start_action("rollback"); }
+    else if (strcmp(action, "start") == 0)
+        show_page(installed_same && model_known ? PAGE_INSTALLED : PAGE_MODE);
     else if (strcmp(action, "restore") == 0) { demo_root = NULL; start_action("restore"); }
     else if (strcmp(action, "restart") == 0) {
         demo_root = NULL; show_page(PAGE_CHECK); start_action("check");
@@ -340,13 +353,23 @@ static lv_obj_t *make_button(lv_obj_t *parent, const char *text, const char *act
 
 /* "Back", "No", "Restore", "Mainsail" and "Install without backup" are
  * secondary; every other action is the page's primary (forward-moving) action. */
-static void add_button(const char *text, const char *action)
+static lv_obj_t *add_button(const char *text, const char *action)
 {
     bool secondary = strcmp(action, "back") == 0 || strcmp(action, "touch-no") == 0 ||
                      strcmp(action, "home") == 0 || strcmp(action, "recovery") == 0 ||
+                     strcmp(action, "rollback-confirm") == 0 || strcmp(action, "start") == 0 ||
                      strcmp(action, "restore-confirm") == 0 || strcmp(action, "mainsail") == 0 ||
                      strcmp(action, "install-nobackup") == 0;
-    make_button(button_row, text, action, !secondary, 220, 58);
+    return make_button(button_row, text, action, !secondary, 220, 58);
+}
+
+/* Greyed out and not clickable. */
+static void disable_button(lv_obj_t *button)
+{
+    lv_obj_add_state(button, LV_STATE_DISABLED);
+    lv_obj_set_style_bg_color(button, lv_color_hex(OC_COLOR_TRACK), LV_STATE_DISABLED);
+    lv_obj_set_style_border_width(button, 0, LV_STATE_DISABLED);
+    lv_obj_set_style_text_color(lv_obj_get_child(button, 0), lv_color_hex(OC_COLOR_MUTED), 0);
 }
 
 static void add_summary_row(const char *label, const char *value)
@@ -381,6 +404,7 @@ static void show_page(enum page next)
     lv_label_set_text(step_label, step_buf);
     bool restoring = strcmp(current_action, "restore") == 0;
     bool reconfiguring = strcmp(current_action, "reconfigure") == 0;
+    bool rolling_back = strcmp(current_action, "rollback") == 0;
 
     switch (next) {
     case PAGE_CHECK:
@@ -416,22 +440,36 @@ static void show_page(enum page next)
         add_button("Recovery", "recovery");
         add_button("Update Configs", "update-configs");
         if (backup_found[0]) add_button(LV_SYMBOL_LOOP "  Restore backup", "restore-confirm");
+        if (stock_found[0]) add_button(LV_SYMBOL_REFRESH "  Rollback to stock", "rollback-confirm");
         break;
     case PAGE_MODE:
         set_title(next, "Where should Klipper run?");
-        lv_label_set_text(body_label, update_configs
-            ? (strcmp(prev_mode, "soc") == 0 ? "Currently: on the printer SoC."
-                                              : "Currently: tunneled to another host.")
-            : "Choose on-device installation or tunnel to another host.");
+        {
+            static char buf[320];
+            snprintf(buf, sizeof(buf), "%s%s%s%s",
+                     update_configs
+                         ? (strcmp(prev_mode, "soc") == 0 ? "Currently: on the printer SoC."
+                                                           : "Currently: tunneled to another host.")
+                         : "Choose on-device installation or tunnel to another host.",
+                     tunnel_blocked ? "\nTunneled needs FlashForge firmware 1.9.9 (this printer has " : "",
+                     tunnel_blocked ? ff_version : "",
+                     tunnel_blocked ? "). Update the printer to 1.9.9 to use it." : "");
+            lv_label_set_text(body_label, buf);
+        }
         if (warn_text[0]) {
             lv_label_set_text_static(notice_label, warn_text);
             lv_obj_clear_flag(notice_label, LV_OBJ_FLAG_HIDDEN);
         }
         if (installed_same) add_button("Back", "home");
         add_button("On printer SoC", "soc");
-        add_button("Tunneled", "tunnel");
+        {
+            lv_obj_t *tunnel = add_button("Tunneled", "tunnel");
+            if (tunnel_blocked) disable_button(tunnel);
+        }
         if (backup_found[0] && !installed_same)
             add_button(LV_SYMBOL_LOOP "  Restore backup", "restore-confirm");
+        if (stock_found[0] && !installed_same)
+            add_button(LV_SYMBOL_REFRESH "  Rollback to stock", "rollback-confirm");
         break;
     case PAGE_WEB:
         set_title(next, "Choose web interface");
@@ -501,10 +539,24 @@ static void show_page(enum page next)
         if (strcmp(mode, "soc") == 0) add_summary_row("Web UI", web);
         add_summary_row("Touchscreen",
                          strcmp(touchscreen, "yes") == 0 ? "GrumpyScreen" : "None");
+        if (warn_text[0]) {
+            lv_label_set_text_static(notice_label, warn_text);
+            lv_obj_clear_flag(notice_label, LV_OBJ_FLAG_HIDDEN);
+        }
         add_button("Back", "back");
 #ifdef OC_DEMO
         add_button("Demo install", "demo-install");
 #endif
+        /* A new install (no previous OpenCreator) needs 2 GB free. */
+        if (space_low && !prev_version[0]) {
+            static char buf[256];
+            snprintf(buf, sizeof(buf),
+                     "Not enough free space: only %d MB free on the printer, and a new install "
+                     "needs 2 GB. Free up space on /usr/data, then check again.", space_mb);
+            lv_label_set_text(body_label, buf);
+            add_button("Check again", "restart");
+            break;
+        }
 #ifndef OC_DEMO
         if (model_known) add_button("Install without backup", "install-nobackup");
 #endif
@@ -515,20 +567,37 @@ static void show_page(enum page next)
         {
             static char buf[700];
             snprintf(buf, sizeof(buf),
-                     "Klipper, PROGRAM, config and web UI folders will be replaced with "
+                     "FlashForge's firmwareExe, Klipper, config and web UI folders will be replaced with "
                      "the copies in:\n%s\nMCU firmware is not rolled back.", backup_found);
             lv_label_set_text(body_label, buf);
         }
         add_button("Back", "back");
         add_button("Restore now", "restore");
         break;
+    case PAGE_ROLLBACK:
+        set_title(next, "Roll back to stock?");
+        {
+            static char buf[1024];
+            snprintf(buf, sizeof(buf),
+                     "Only FlashForge's firmwareExe is put back, from:\n%s\n"
+                     "Everything OpenCreator runs is started by its own firmwareExe, so "
+                     "after a reboot the printer runs the stock firmware. OpenCreator's "
+                     "files stay on the printer; install again to go back. MCU firmware "
+                     "is not rolled back.", stock_found);
+            lv_label_set_text(body_label, buf);
+        }
+        add_button("Back", "start");
+        add_button("Roll back now", "rollback");
+        break;
     case PAGE_RUNNING:
         set_title(next, restoring ? "Restoring backup"
+                        : rolling_back ? "Rolling back to stock"
                         : reconfiguring ? "Applying changes"
                         : demo_root ? "Demo installing" : "Installing");
         lv_label_set_text(body_label, demo_root
             ? "Follow the live status below. Writing to " OC_DEMO_INSTALL_ROOT
               ", not the real system -- safe to power off."
+            : rolling_back ? "Putting FlashForge's firmwareExe back. Do not power off."
             : reconfiguring
             ? "Follow the live status below and do not power off. Anything the new "
               "setup needs that is not on the printer yet is downloaded first."
@@ -542,6 +611,10 @@ static void show_page(enum page next)
         if (restoring) {
             set_title(next, "Restore complete");
             lv_label_set_text(body_label, "The backed-up folders are back in place. Reboot to start the restored stack.");
+        } else if (rolling_back) {
+            set_title(next, "Rolled back to stock");
+            lv_label_set_text(body_label, "FlashForge's firmwareExe is back. Unplug the installer "
+                              "USB drive and reboot to start the stock firmware.");
         } else {
             set_title(next, demo_root ? "Demo install complete"
                             : reconfiguring ? "Changes applied" : "Installation complete");
@@ -563,12 +636,32 @@ static void show_page(enum page next)
         if (!demo_root) add_button(LV_SYMBOL_POWER "  Reboot now", "reboot");
         break;
     case PAGE_ERROR:
-        set_title(next, restoring ? "Restore stopped" : "Installation stopped");
+        set_title(next, restoring ? "Restore stopped"
+                        : rolling_back ? "Rollback stopped" : "Installation stopped");
         lv_label_set_text(body_label, "No later stages were run. Open the log for details and check the backup before retrying.");
         add_button("Start over", "restart");
         if (backup_found[0] && strcmp(current_action, "install") == 0 && !demo_root)
             add_button(LV_SYMBOL_LOOP "  Restore backup", "restore-confirm");
         break;
+    }
+
+    /* Buttons are 220 px wide; narrow them (labels wrap) when more than
+     * three share the row. */
+    uint32_t count = lv_obj_get_child_cnt(button_row);
+    if (count > 0) {
+        lv_obj_update_layout(button_row);
+        lv_coord_t w = (lv_obj_get_content_width(button_row) - (lv_coord_t)(count - 1) * 16) /
+                       (lv_coord_t)count;
+        if (w > 220) w = 220;
+        for (uint32_t i = 0; i < count; i++) {
+            lv_obj_t *button = lv_obj_get_child(button_row, (int32_t)i);
+            lv_obj_t *label = lv_obj_get_child(button, 0);
+            lv_obj_set_width(button, w);
+            lv_label_set_long_mode(label, LV_LABEL_LONG_WRAP);
+            lv_obj_set_width(label, w - 16);
+            lv_obj_set_style_text_align(label, LV_TEXT_ALIGN_CENTER, 0);
+            lv_obj_center(label);
+        }
     }
 }
 
@@ -605,6 +698,16 @@ static void process_line(char *line)
         installed_same = strcmp(prev_version, installer_version) == 0 &&
                          (strcmp(prev_mode, "soc") == 0 || strcmp(prev_mode, "tunnel") == 0) &&
                          (strcmp(prev_touch, "yes") == 0 || strcmp(prev_touch, "no") == 0);
+    } else if (strncmp(line, "FIRMWARE ", 9) == 0) {
+        int a = 0, b = 0, c = 0;
+        snprintf(ff_version, sizeof(ff_version), "%.30s", line + 9);
+        tunnel_blocked = sscanf(ff_version, "%d.%d.%d", &a, &b, &c) >= 2 &&
+                         a * 1000000 + b * 1000 + c < 1009009;
+    } else if (strncmp(line, "SPACE LOW ", 10) == 0) {
+        space_low = true;
+        space_mb = atoi(line + 10);
+    } else if (strncmp(line, "STOCK ", 6) == 0) {
+        snprintf(stock_found, sizeof(stock_found), "%.500s", line + 6);
     } else if (strncmp(line, "BACKUP ", 7) == 0) {
         snprintf(backup_found, sizeof(backup_found), "%.500s", line + 7);
     } else if (strncmp(line, "PROGRESS ", 9) == 0) {
