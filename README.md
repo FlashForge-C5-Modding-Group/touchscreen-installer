@@ -44,9 +44,11 @@ Both modes start with:
    `startup/`, `tunneled/` and `moonraker/` folders in `/usr/data/opencreator`,
    the nginx snippets in `/usr/data/nginx/conf.d`, and the OpenCreator boot logo
    (`payload/common/logo.jpeg`, made by `scripts/gen-boot-logo.py`) at
-   `/usr/data/logo.jpeg`. The stock logo is kept as
-   `/usr/data/opencreator/logo.jpeg.stock` and in the backup. `/etc/logo.jpeg`
-   (used when `/usr/data/logo.jpeg` is missing) is left alone.
+   `/usr/prog/logo.jpeg`, the file `/etc/init.d/S10jpeg_display_shell` shows at
+   boot. Like FlashForge's, it is 480x800: the landscape logo turned a quarter
+   turn counter-clockwise, since the panel's framebuffer is portrait. The stock
+   logo is kept as `/usr/data/opencreator/logo.jpeg.stock` and in the backup.
+   `/etc/logo.jpeg` (used when `/usr/prog/logo.jpeg` is missing) is left alone.
 3. **MCU firmware**, last of all (`95-flash-mcu-firmware.sh`), from the package
    on the drive named for the printer: `Creator5Pro-*.tgz` on a Creator 5 Pro,
    `Creator5-*.tgz` on a Creator 5, as the stock USB update does. Build them

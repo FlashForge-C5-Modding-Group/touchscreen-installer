@@ -5,7 +5,7 @@ set -eu
 DEMO_ROOT=${OC_DEMO_ROOT:-}
 OCDIR=$DEMO_ROOT/usr/data/opencreator
 FIRMWARE_EXE=$DEMO_ROOT/usr/prog/PROGRAM/software/firmwareExe
-LOGO=$DEMO_ROOT/usr/data/logo.jpeg
+LOGO=$DEMO_ROOT/usr/prog/logo.jpeg
 : "${OC_PAYLOAD:?}"
 
 die() { echo "ERROR $*"; exit 1; }

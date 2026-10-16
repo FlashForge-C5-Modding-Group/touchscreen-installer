@@ -34,10 +34,19 @@ fluidd) WEB_ROOT=/usr/data/fluidd ;;
 *) die "unknown web UI '$WEB_UI' (expected mainsail or fluidd)" ;;
 esac
 
-install_zip_release mainsail-crew/mainsail mainsail.zip "$MAINSAIL_DIR"
-echo "STAGE Mainsail installed to $MAINSAIL_DIR"
-install_zip_release fluidd-core/fluidd fluidd.zip "$FLUIDD_DIR"
-echo "STAGE Fluidd installed to $FLUIDD_DIR"
+# Update Configs (OC_KEEP_WEB=1) only downloads a UI that is missing.
+if [ "${OC_KEEP_WEB:-0}" = 1 ] && [ -f "$MAINSAIL_DIR/index.html" ]; then
+    echo "STAGE Mainsail already installed"
+else
+    install_zip_release mainsail-crew/mainsail mainsail.zip "$MAINSAIL_DIR"
+    echo "STAGE Mainsail installed to $MAINSAIL_DIR"
+fi
+if [ "${OC_KEEP_WEB:-0}" = 1 ] && [ -f "$FLUIDD_DIR/index.html" ]; then
+    echo "STAGE Fluidd already installed"
+else
+    install_zip_release fluidd-core/fluidd fluidd.zip "$FLUIDD_DIR"
+    echo "STAGE Fluidd installed to $FLUIDD_DIR"
+fi
 
 if [ ! -f "$SITE" ]; then
     [ -n "$DEMO_ROOT" ] || die "nginx site $SITE missing"
@@ -74,6 +83,11 @@ if [ -f "$MOONRAKER_CONF" ]; then
     fi
     add_update_entry mainsail mainsail-crew/mainsail /usr/data/mainsail
     add_update_entry fluidd fluidd-core/fluidd /usr/data/fluidd
+    if ! grep -q '^\[update_manager opencreator\]' "$MOONRAKER_CONF"; then
+        echo "STAGE Adding the OpenCreator configs to Moonraker's update manager"
+        printf '\n[update_manager opencreator]\ntype: git_repo\npath: /usr/data/opencreator/opencreator-fs\norigin: https://github.com/FlashForge-C5-Modding-Group/opencreator-fs.git\nprimary_branch: main\nis_system_service: False\n' \
+            >> "$MOONRAKER_CONF"
+    fi
 fi
 sync
 echo "STAGE nginx serves $WEB_UI on port 80"

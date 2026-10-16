@@ -15,7 +15,8 @@
 #include "platform.h"
 
 enum page { PAGE_CHECK, PAGE_MODE, PAGE_WEB, PAGE_TOUCHSCREEN, PAGE_READY,
-            PAGE_RUNNING, PAGE_DONE, PAGE_ERROR, PAGE_RESTORE, PAGE_KERNEL };
+            PAGE_RUNNING, PAGE_DONE, PAGE_ERROR, PAGE_RESTORE, PAGE_KERNEL,
+            PAGE_INSTALLED };
 static enum page page_now;
 static const char *payload_path, *backup_path, *script_path;
 static const char *mode = "soc", *web = "fluidd";
@@ -46,6 +47,11 @@ static uint64_t running_since, splash_until;
 static char machine[32] = "unknown";
 static bool model_known;
 static char backup_found[512];
+/* From the install record. When it was made by this installer version,
+ * the start page offers Recovery (the full setup) or Update Configs (only
+ * what changed, via the "reconfigure" action). */
+static char prev_version[32], prev_mode[16], prev_web[16], prev_touch[8];
+static bool installed_same, update_configs;
 static char warn_text[1024];
 static char log_text[12288];
 static size_t log_len;
@@ -250,6 +256,7 @@ static void start_action(const char *action)
         warn_text[0] = '\0';
         splash_until = now_ms() + 1500;
         backup_found[0] = '\0';
+        installed_same = update_configs = false;
     } else {
         lv_bar_set_range(progress_bar, 0, 1);
         lv_bar_set_value(progress_bar, 0, LV_ANIM_OFF);
@@ -289,7 +296,16 @@ static void action_button(lv_event_t *event)
         demo_root = NULL; setenv("OC_SKIP_BACKUP", "1", 1); start_action("install");
     } else if (strcmp(action, "demo-install") == 0) {
         demo_root = OC_DEMO_INSTALL_ROOT; unsetenv("OC_SKIP_BACKUP"); start_action("install");
-    } else if (strcmp(action, "back") == 0) show_page(PAGE_MODE);
+    } else if (strcmp(action, "recovery") == 0) {
+        update_configs = false; show_page(PAGE_MODE);
+    } else if (strcmp(action, "update-configs") == 0) {
+        update_configs = true;
+        mode = prev_mode; web = prev_web; touchscreen = prev_touch;
+        show_page(PAGE_MODE);
+    } else if (strcmp(action, "reconfigure") == 0) {
+        demo_root = NULL; unsetenv("OC_SKIP_BACKUP"); start_action("reconfigure");
+    } else if (strcmp(action, "home") == 0) show_page(PAGE_INSTALLED);
+    else if (strcmp(action, "back") == 0) show_page(PAGE_MODE);
     else if (strcmp(action, "restore-confirm") == 0) show_page(PAGE_RESTORE);
     else if (strcmp(action, "restore") == 0) { demo_root = NULL; start_action("restore"); }
     else if (strcmp(action, "restart") == 0) {
@@ -327,6 +343,7 @@ static lv_obj_t *make_button(lv_obj_t *parent, const char *text, const char *act
 static void add_button(const char *text, const char *action)
 {
     bool secondary = strcmp(action, "back") == 0 || strcmp(action, "touch-no") == 0 ||
+                     strcmp(action, "home") == 0 || strcmp(action, "recovery") == 0 ||
                      strcmp(action, "restore-confirm") == 0 || strcmp(action, "mainsail") == 0 ||
                      strcmp(action, "install-nobackup") == 0;
     make_button(button_row, text, action, !secondary, 220, 58);
@@ -363,6 +380,7 @@ static void show_page(enum page next)
     }
     lv_label_set_text(step_label, step_buf);
     bool restoring = strcmp(current_action, "restore") == 0;
+    bool reconfiguring = strcmp(current_action, "reconfigure") == 0;
 
     switch (next) {
     case PAGE_CHECK:
@@ -383,16 +401,37 @@ static void show_page(enum page next)
         }
         add_button("Check again", "restart");
         break;
+    case PAGE_INSTALLED:
+        set_title(next, "OpenCreator is installed");
+        {
+            static char buf[400];
+            snprintf(buf, sizeof(buf),
+                     "OpenCreator %s is already installed: %s, web UI %s, touchscreen %s.\n"
+                     "Recovery runs the whole setup again. Update Configs lets you pick the "
+                     "settings again and only changes what is different.",
+                     prev_version, strcmp(prev_mode, "soc") == 0 ? "printer SoC" : "tunneled",
+                     prev_web, prev_touch);
+            lv_label_set_text(body_label, buf);
+        }
+        add_button("Recovery", "recovery");
+        add_button("Update Configs", "update-configs");
+        if (backup_found[0]) add_button(LV_SYMBOL_LOOP "  Restore backup", "restore-confirm");
+        break;
     case PAGE_MODE:
         set_title(next, "Where should Klipper run?");
-        lv_label_set_text(body_label, "Choose on-device installation or tunnel to another host.");
+        lv_label_set_text(body_label, update_configs
+            ? (strcmp(prev_mode, "soc") == 0 ? "Currently: on the printer SoC."
+                                              : "Currently: tunneled to another host.")
+            : "Choose on-device installation or tunnel to another host.");
         if (warn_text[0]) {
             lv_label_set_text_static(notice_label, warn_text);
             lv_obj_clear_flag(notice_label, LV_OBJ_FLAG_HIDDEN);
         }
+        if (installed_same) add_button("Back", "home");
         add_button("On printer SoC", "soc");
         add_button("Tunneled", "tunnel");
-        if (backup_found[0]) add_button(LV_SYMBOL_LOOP "  Restore backup", "restore-confirm");
+        if (backup_found[0] && !installed_same)
+            add_button(LV_SYMBOL_LOOP "  Restore backup", "restore-confirm");
         break;
     case PAGE_WEB:
         set_title(next, "Choose web interface");
@@ -410,6 +449,37 @@ static void show_page(enum page next)
         add_button("No", "touch-no");
         break;
     case PAGE_READY:
+        if (update_configs) {
+            static char rows[3][96];
+            int changes = 0;
+            set_title(next, "Update Configs");
+            lv_obj_clear_flag(summary_box, LV_OBJ_FLAG_HIDDEN);
+            if (strcmp(mode, prev_mode) != 0) {
+                snprintf(rows[changes], sizeof(rows[0]), "%s  " LV_SYMBOL_RIGHT "  %s",
+                         strcmp(prev_mode, "soc") == 0 ? "Printer SoC" : "Tunneled",
+                         strcmp(mode, "soc") == 0 ? "Printer SoC" : "Tunneled");
+                add_summary_row("Mode", rows[changes++]);
+            }
+            if (strcmp(mode, "soc") == 0 && strcmp(web, prev_web) != 0) {
+                snprintf(rows[changes], sizeof(rows[0]), "%s  " LV_SYMBOL_RIGHT "  %s",
+                         prev_web, web);
+                add_summary_row("Web UI", rows[changes++]);
+            }
+            if (strcmp(touchscreen, prev_touch) != 0) {
+                snprintf(rows[changes], sizeof(rows[0]), "%s  " LV_SYMBOL_RIGHT "  %s",
+                         strcmp(prev_touch, "yes") == 0 ? "GrumpyScreen" : "None",
+                         strcmp(touchscreen, "yes") == 0 ? "GrumpyScreen" : "None");
+                add_summary_row("Touchscreen", rows[changes++]);
+            }
+            lv_label_set_text(body_label, changes == 0
+                ? "Nothing is different from the current setup."
+                : "Only these changes are applied; nothing is backed up or reinstalled. "
+                  "Anything the new setup needs that is not on the printer yet is "
+                  "downloaded, so the printer needs internet.");
+            add_button("Back", "back");
+            if (changes > 0 && model_known) add_button("Apply changes", "reconfigure");
+            break;
+        }
         set_title(next, "Ready to install");
         lv_label_set_text(body_label, !model_known
             ? "The printer model could not be detected, so installation is blocked. "
@@ -454,10 +524,14 @@ static void show_page(enum page next)
         break;
     case PAGE_RUNNING:
         set_title(next, restoring ? "Restoring backup"
+                        : reconfiguring ? "Applying changes"
                         : demo_root ? "Demo installing" : "Installing");
         lv_label_set_text(body_label, demo_root
             ? "Follow the live status below. Writing to " OC_DEMO_INSTALL_ROOT
               ", not the real system -- safe to power off."
+            : reconfiguring
+            ? "Follow the live status below and do not power off. Anything the new "
+              "setup needs that is not on the printer yet is downloaded first."
             : "This may take a while (often 30 minutes or more): Entware, Python "
               "packages and the MCU firmware are installed one after another. "
               "Follow the live status below and do not power off.");
@@ -469,10 +543,13 @@ static void show_page(enum page next)
             set_title(next, "Restore complete");
             lv_label_set_text(body_label, "The backed-up folders are back in place. Reboot to start the restored stack.");
         } else {
-            set_title(next, demo_root ? "Demo install complete" : "Installation complete");
+            set_title(next, demo_root ? "Demo install complete"
+                            : reconfiguring ? "Changes applied" : "Installation complete");
             lv_label_set_text(body_label, demo_root
                 ? "Nothing on the real system was touched. Inspect the files it would "
                   "have written at " OC_DEMO_INSTALL_ROOT "."
+                : reconfiguring
+                ? "Reboot to start with the new settings, and unplug the installer USB drive."
                 : "Reboot to start OpenCreator. Unplug the installer USB drive once you're "
                   "done -- leaving it plugged in risks it being picked up again on the next boot.");
             if (strcmp(mode, "tunnel") == 0 && strcmp(touchscreen, "yes") == 0) {
@@ -523,6 +600,11 @@ static void process_line(char *line)
         size_t len = strlen(warn_text);
         snprintf(warn_text + len, sizeof(warn_text) - len, "%s" LV_SYMBOL_WARNING "  %.200s",
                  len ? "\n" : "", line + 5);
+    } else if (strncmp(line, "PREVIOUS ", 9) == 0) {
+        sscanf(line + 9, "%31s %15s %15s %7s", prev_version, prev_mode, prev_web, prev_touch);
+        installed_same = strcmp(prev_version, installer_version) == 0 &&
+                         (strcmp(prev_mode, "soc") == 0 || strcmp(prev_mode, "tunnel") == 0) &&
+                         (strcmp(prev_touch, "yes") == 0 || strcmp(prev_touch, "no") == 0);
     } else if (strncmp(line, "BACKUP ", 7) == 0) {
         snprintf(backup_found, sizeof(backup_found), "%.500s", line + 7);
     } else if (strncmp(line, "PROGRESS ", 9) == 0) {
@@ -530,6 +612,10 @@ static void process_line(char *line)
         if (sscanf(line + 9, "%d %d", &n, &total) == 2 && total > 0 && n >= 0) {
             lv_bar_set_range(progress_bar, 0, total);
             lv_bar_set_value(progress_bar, n > total ? total : n, LV_ANIM_ON);
+            /* PROGRESS n means n steps are done, so step n + 1 is running. */
+            static char step_buf[32];
+            snprintf(step_buf, sizeof(step_buf), "Step %d of %d", n < total ? n + 1 : total, total);
+            if (page_now == PAGE_RUNNING) lv_label_set_text(step_label, step_buf);
         }
     }
 }
@@ -566,7 +652,8 @@ static void poll_child(void)
     if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
         show_page(PAGE_ERROR);
     } else if (strcmp(current_action, "check") == 0) {
-        show_page(kernel_ok ? PAGE_MODE : PAGE_KERNEL);
+        show_page(!kernel_ok ? PAGE_KERNEL
+                  : installed_same && model_known ? PAGE_INSTALLED : PAGE_MODE);
     } else {
         show_page(PAGE_DONE);
     }

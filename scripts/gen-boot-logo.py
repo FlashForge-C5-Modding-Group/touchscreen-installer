@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-"""Render the 800x480 boot logo (/usr/data/logo.jpeg) from the OpenCreator SVG.
+"""Render the boot logo (/usr/prog/logo.jpeg) from the OpenCreator SVG: drawn
+at 800x480 and saved turned a quarter turn counter-clockwise (480x800), like
+FlashForge's own, because the panel's framebuffer is portrait.
 
 Usage: python3 scripts/gen-boot-logo.py [SVG] [OUT_JPEG]
 Needs Pillow.
@@ -82,6 +84,7 @@ def main():
         ImageDraw.Draw(image).text(
             ((WIDTH - text_w) // 2 - left, top_y + mask.height + gap - top),
             text, font=font, fill=TEXT)
+    image = image.transpose(Image.ROTATE_90)
     image.save(out, "JPEG", quality=92, optimize=True)
     print(out, image.size)
 

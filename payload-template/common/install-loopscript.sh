@@ -21,6 +21,14 @@ trap 'rm -rf "$WORK"' EXIT
 oc_git_clone_shallow "$OPENCREATOR_FS_REPO" "$WORK/opencreator-fs" \
     || die "cannot download opencreator-fs"
 FS=$WORK/opencreator-fs/fs/usr/data
+# SoC: the clone stays for Moonraker's [update_manager opencreator], which
+# 99-opencreator-updater.sh merges config updates from.
+if [ "${OC_MODE:-}" = soc ]; then
+    rm -rf "$OCDIR/opencreator-fs"
+    mkdir -p "$OCDIR"
+    mv "$WORK/opencreator-fs" "$OCDIR/opencreator-fs"
+    FS=$OCDIR/opencreator-fs/fs/usr/data
+fi
 
 echo "STAGE Installing LoopScript"
 mkdir -p "$OCDIR"

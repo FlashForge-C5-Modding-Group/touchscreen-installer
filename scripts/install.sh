@@ -36,7 +36,7 @@ INSTALLER_VERSION=0.3.0
 MIN_FREE_KB=${OC_MIN_FREE_KB:-262144}
 BACKUP_FOLDERS="usr/prog/PROGRAM usr/prog/moonraker usr/data/opencreator
 usr/data/mainsail usr/data/fluidd usr/data/nginx usr/prog/c5-tunnel-socat
-usr/data/logo.jpeg usr/prog/app_startup.sh"
+usr/prog/logo.jpeg usr/prog/app_startup.sh"
 
 stage() { printf 'STAGE %s\n' "$*"; }
 warn() { printf 'WARN %s\n' "$*"; }
@@ -146,6 +146,8 @@ check() {
         previous_web=$(sed -n 's/^  "web_ui": "\([^"]*\)",$/\1/p' "$INSTALL_STATE" | head -n 1)
         previous_touch=$(sed -n 's/^  "touchscreen": "\([^"]*\)",$/\1/p' "$INSTALL_STATE" | head -n 1)
         stage "Previous OpenCreator $previous_version: $previous_mode, $previous_web, touchscreen $previous_touch"
+        printf 'PREVIOUS %s %s %s %s\n' "${previous_version:-?}" "${previous_mode:-?}" \
+            "${previous_web:-?}" "${previous_touch:-?}"
     else
         stage "No prior OpenCreator install record"
     fi
@@ -241,13 +243,7 @@ install_payload() {
             OC_BACKUP="$BACKUP_TARGET" /bin/sh "$script" || die "failed: ${script##*/}"
         progress "$n" "$total"
     done
-    mkdir -p "$STATE_DIR"
-    stage "Writing install record"
-    printf '{\n  "installer_version": "%s",\n  "machine": "%s",\n  "pid": "%s",\n  "kernel_package": "%s",\n  "mode": "%s",\n  "web_ui": "%s",\n  "touchscreen": "%s",\n  "backup": "%s",\n  "installed_utc": "%s"\n}\n' \
-        "$INSTALLER_VERSION" "$MACHINE" "$PID" "$KERNEL_PACKAGE" "$MODE" "$WEB" "$TOUCHSCREEN" \
-        "$RECORDED_BACKUP" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$INSTALL_STATE.tmp"
-    mv "$INSTALL_STATE.tmp" "$INSTALL_STATE"
-    sync
+    write_state
     progress "$total" "$total"
     stage "OpenCreator installation complete"
 }
@@ -298,9 +294,110 @@ restore_backup() {
     stage "Restore complete; reboot to start the restored stack"
 }
 
+write_state() {
+    mkdir -p "$STATE_DIR"
+    stage "Writing install record"
+    printf '{\n  "installer_version": "%s",\n  "machine": "%s",\n  "pid": "%s",\n  "kernel_package": "%s",\n  "mode": "%s",\n  "web_ui": "%s",\n  "touchscreen": "%s",\n  "backup": "%s",\n  "installed_utc": "%s"\n}\n' \
+        "$INSTALLER_VERSION" "$MACHINE" "$PID" "$KERNEL_PACKAGE" "$MODE" "$WEB" "$TOUCHSCREEN" \
+        "$RECORDED_BACKUP" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$INSTALL_STATE.tmp"
+    mv "$INSTALL_STATE.tmp" "$INSTALL_STATE"
+    sync
+}
+state_value() {
+    sed -n "s/^  \"$1\": \"\\([^\"]*\\)\",\$/\\1/p" "$INSTALL_STATE" | head -n 1
+}
+run_step() {  # run_step installers/MODE/NN-name.sh
+    stage "Running ${1##*/}"
+    OC_PAYLOAD="$PAYLOAD" OC_MODE="$MODE" OC_WEB_UI="$WEB" \
+        OC_TOUCHSCREEN="$TOUCHSCREEN" OC_MACHINE="$MACHINE" OC_PID="$PID" \
+        OC_KERNEL_PACKAGE="$KERNEL_PACKAGE" OC_NAN_ADDR="$NAN_ADDR" \
+        OC_BACKUP="$BACKUP_TARGET" OC_KEEP_WEB=1 /bin/sh "$PAYLOAD/$1" || die "failed: ${1##*/}"
+}
+# Update Configs: compares the choices with the install record and only
+# applies what differs. Nothing is backed up and nothing already installed
+# is downloaded again.
+reconfigure() {
+    [ -n "$DEMO_ROOT" ] || [ "$(id -u)" -eq 0 ] || die "changing the setup requires root"
+    case "$MODE" in soc|tunnel) ;; *) die "invalid install mode" ;; esac
+    case "$WEB" in mainsail|fluidd|none) ;; *) die "invalid web UI" ;; esac
+    case "$TOUCHSCREEN" in yes|no) ;; *) die "invalid touchscreen choice" ;; esac
+    [ "$MODE" != tunnel ] || [ "$WEB" = none ] || die "tunnel mode must skip web UI"
+    [ "$MODE" != soc ] || [ "$WEB" != none ] || die "SoC mode requires a web UI"
+    [ -f "$INSTALL_STATE" ] || die "no OpenCreator install record; use Recovery instead"
+    detect_model || die "unsupported or undetected printer model"
+    kernel_supported || die "unsupported FlashForge kernel package $KERNEL_PACKAGE"
+    old_mode=$(state_value mode)
+    old_web=$(state_value web_ui)
+    old_touch=$(state_value touchscreen)
+    RECORDED_BACKUP=$(state_value backup)
+    BACKUP_TARGET=$STATE_DIR/no-backup
+    mkdir -p "$BACKUP_TARGET"
+    OC=$DEMO_ROOT/usr/data/opencreator
+    MR=$DEMO_ROOT/usr/prog/moonraker
+    TUNNELED=$OC/tunneled/tunneled.sh
+    GRUMPY_DIR=$DEMO_ROOT/usr/data/grumpyscreen
+
+    steps=
+    if [ "$MODE" != "$old_mode" ]; then
+        stage "Switching from $old_mode to $MODE"
+        if [ "$MODE" = tunnel ]; then
+            steps="installers/tunnel/01-install-entware.sh installers/tunnel/10-install-tunnel.sh"
+        else
+            steps="installers/soc/01-install-entware.sh installers/soc/02-install-loopscript.sh"
+            [ -f "$OC/klipper/klipper/klippy/klippy.py" ] && [ -x "$OC/klipper/klippy-env/bin/python" ] ||
+                steps="$steps installers/soc/10-install-stack.sh"
+            # Tunnel installs leave FlashForge's own Moonraker in place.
+            git -C "$MR/moonraker" remote get-url origin 2>/dev/null | grep -q Arksine &&
+                [ -x "$MR/moonraker-env/bin/python" ] ||
+                steps="$steps installers/soc/15-install-moonraker.sh"
+            steps="$steps installers/soc/20-install-web.sh"
+        fi
+    elif [ "$MODE" = soc ] && [ "$WEB" != "$old_web" ]; then
+        steps="installers/soc/20-install-web.sh"
+    fi
+    if [ "$TOUCHSCREEN" = yes ] && [ "$old_touch" != yes ]; then
+        [ -f "$GRUMPY_DIR/grumpyscreen" ] ||
+            steps="$steps installers/$MODE/30-install-grumpyscreen.sh"
+        [ -f "$GRUMPY_DIR/grumpyscreen.cfg" ] || case " $steps " in
+            *" installers/$MODE/02-install-loopscript.sh "*) ;;
+            *) steps="installers/$MODE/02-install-loopscript.sh $steps" ;;
+        esac
+    fi
+
+    total=2
+    for step in $steps; do total=$((total + 1)); done
+    progress 0 "$total"
+    n=0
+    for step in $steps; do
+        run_step "$step"
+        n=$((n + 1))
+        progress "$n" "$total"
+    done
+    # firmwareExe starts the bridge instead of startup.sh when this is
+    # executable; set every time, since 02-install-loopscript.sh resets it.
+    if [ -f "$TUNNELED" ]; then
+        if [ "$MODE" = tunnel ]; then chmod 755 "$TUNNELED"; else chmod 644 "$TUNNELED"; fi
+    fi
+    [ "$MODE" = "$old_mode" ] || stage "LoopScript now starts the $MODE setup"
+    if [ "$TOUCHSCREEN" != "$old_touch" ] && [ -f "$GRUMPY_DIR/grumpyscreen" ]; then
+        # 40-grumpyscreen.sh only starts an executable binary.
+        if [ "$TOUCHSCREEN" = yes ]; then
+            chmod 755 "$GRUMPY_DIR/grumpyscreen"
+            stage "GrumpyScreen turned on"
+        else
+            chmod 644 "$GRUMPY_DIR/grumpyscreen"
+            stage "GrumpyScreen turned off (kept on the printer)"
+        fi
+    fi
+    write_state
+    progress "$total" "$total"
+    stage "Changes applied; reboot to start with them"
+}
+
 case "$ACTION" in
     check) check ;;
     install) install_payload ;;
+    reconfigure) reconfigure ;;
     restore) restore_backup ;;
     *) die "unknown action" ;;
 esac
