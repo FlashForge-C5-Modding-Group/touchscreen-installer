@@ -32,14 +32,16 @@ if [ -z "$DEMO_ROOT" ]; then
 fi
 STATE_DIR=${OC_STATE_DIR:-"$DEMO_ROOT/usr/data/opencreator"}
 INSTALL_STATE=$STATE_DIR/install.json
-INSTALLER_VERSION=0.3.0
+INSTALLER_VERSION=0.4.0
 MIN_FREE_KB=${OC_MIN_FREE_KB:-262144}
 BACKUP_FOLDERS="usr/prog/PROGRAM/software/firmwareExe usr/prog/moonraker usr/data/opencreator
 usr/data/mainsail usr/data/fluidd usr/data/nginx usr/prog/c5-tunnel-socat
 usr/prog/logo.jpeg usr/prog/app_startup.sh"
 
-# Other custom firmware OpenCreator replaces: backed up, then removed.
-FOREIGN_FOLDERS="usr/data/zmod usr/data/anvil"
+# Other custom firmware OpenCreator replaces, and the old Moonraker copies
+# left in /usr/prog/moonraker (moonraker-old, moonraker-env-old, numbered or
+# not): backed up, then removed.
+FOREIGN_FOLDERS="usr/data/zmod usr/data/.mod usr/data/anvil"
 # A new install needs this much free on /usr/data (updates and config changes don't).
 NEW_INSTALL_MIN_KB=${OC_NEW_INSTALL_MIN_KB:-2097152}
 
@@ -130,9 +132,20 @@ tunnel_supported() {
 }
 foreign_name() {
     case "$1" in
-        usr/data/zmod) echo ZMod ;;
+        usr/data/zmod|usr/data/.mod) echo ZMod ;;
         usr/data/anvil) echo Reforge ;;
+        usr/prog/moonraker/*) echo Moonraker ;;
     esac
+}
+# The foreign folders present on this printer, one per line.
+foreign_folders() {
+    for folder in $FOREIGN_FOLDERS; do
+        [ ! -e "$DEMO_ROOT/$folder" ] || echo "$folder"
+    done
+    for dir in "$DEMO_ROOT"/usr/prog/moonraker/moonraker-old* \
+               "$DEMO_ROOT"/usr/prog/moonraker/moonraker-env-old*; do
+        [ ! -e "$dir" ] || echo "${dir#"$DEMO_ROOT"/}"
+    done
 }
 # Free KB on /usr/data, counting what removing ZMod/Reforge frees up.
 usable_kb() {
@@ -140,8 +153,7 @@ usable_kb() {
     [ -d "$data_dir" ] || data_dir=${DEMO_ROOT:-/}
     kb=$(free_kb "$data_dir")
     [ -n "$kb" ] || return 1
-    for folder in $FOREIGN_FOLDERS; do
-        [ -d "$DEMO_ROOT/$folder" ] || continue
+    for folder in $(foreign_folders); do
         used=$(du -sk "$DEMO_ROOT/$folder" 2>/dev/null | awk '{print $1}')
         kb=$((kb + ${used:-0}))
     done
@@ -154,9 +166,11 @@ space_ok() {
     [ "$usable" -ge "$NEW_INSTALL_MIN_KB" ]
 }
 remove_foreign() {
-    for folder in $FOREIGN_FOLDERS; do
-        [ -d "$DEMO_ROOT/$folder" ] || continue
-        stage "Removing the previous $(foreign_name "$folder") install (/$folder)"
+    for folder in $(foreign_folders); do
+        case $folder in
+            usr/prog/moonraker/*) stage "Removing the old Moonraker copy /$folder" ;;
+            *) stage "Removing the previous $(foreign_name "$folder") install (/$folder)" ;;
+        esac
         rm -rf "$DEMO_ROOT/$folder" || die "could not remove /$folder"
     done
 }
@@ -206,9 +220,16 @@ check() {
         stage "No prior OpenCreator install record"
     fi
     preflight
-    for folder in $FOREIGN_FOLDERS; do
-        [ ! -d "$DEMO_ROOT/$folder" ] ||
-            warn "Previous $(foreign_name "$folder") install detected! This will be backed up and removed!"
+    warned=
+    for folder in $(foreign_folders); do
+        name=$(foreign_name "$folder")
+        case " $warned " in *" $name "*) continue ;; esac
+        warned="$warned $name"
+        if [ "$name" = Moonraker ]; then
+            warn "Old Moonraker copies found in /usr/prog/moonraker! These will be backed up and removed!"
+        else
+            warn "Previous $name install detected! This will be backed up and removed!"
+        fi
     done
     detect_ff_version
     printf 'FIRMWARE %s\n' "$FF_VERSION"
@@ -247,7 +268,8 @@ backup_folders() {
     target=$BACKUP_ROOT/opencreator-$stamp-$$
     mkdir "$target" || die "cannot create backup directory"
     : > "$target/absent.list"
-    for folder in ${1:-$BACKUP_FOLDERS $FOREIGN_FOLDERS}; do
+    # Old Moonraker copies are already inside the usr/prog/moonraker archive.
+    for folder in ${1:-$BACKUP_FOLDERS $(foreign_folders | grep -v '^usr/prog/moonraker/')}; do
         if [ -e "$DEMO_ROOT/$folder" ]; then
             name=$(printf '%s' "$folder" | tr / _)
             stage "Backing up /$folder"
@@ -276,6 +298,10 @@ install_payload() {
     [ "$MODE" != soc ] || [ "$WEB" != none ] || die "SoC mode requires a web UI"
     detect_model || die "unsupported or undetected printer model"
     stage "Detected $MACHINE (PID $PID)"
+    # Over an existing install the steps update in place and keep user files
+    # and custom configs; the web UIs are left to Moonraker's update manager.
+    UPDATE=0
+    [ ! -f "$INSTALL_STATE" ] || UPDATE=1
     missing_tools=
     for tool in tar gzip gunzip md5sum sed grep awk find mktemp wget od dd; do
         command -v "$tool" >/dev/null 2>&1 || missing_tools="$missing_tools $tool"
@@ -298,11 +324,9 @@ install_payload() {
     progress 0 "$total"
     if [ "${OC_SKIP_BACKUP:-0}" = 1 ]; then
         stage "Skipping the backup (Install without backup)"
-        # ZMod/Reforge are still archived before they are removed.
-        foreign=
-        for folder in $FOREIGN_FOLDERS; do
-            [ ! -d "$DEMO_ROOT/$folder" ] || foreign="$foreign $folder"
-        done
+        # ZMod/Reforge and old Moonraker copies are still archived before
+        # they are removed.
+        foreign=$(foreign_folders)
         [ -z "$foreign" ] || backup_folders "$foreign"
         # Payload steps still keep small "previous" copies here.
         BACKUP_TARGET=$STATE_DIR/no-backup
@@ -322,7 +346,8 @@ install_payload() {
         OC_PAYLOAD="$PAYLOAD" OC_MODE="$MODE" OC_WEB_UI="$WEB" \
             OC_TOUCHSCREEN="$TOUCHSCREEN" OC_MACHINE="$MACHINE" OC_PID="$PID" \
             OC_KERNEL_PACKAGE="$KERNEL_PACKAGE" OC_NAN_ADDR="$NAN_ADDR" \
-            OC_BACKUP="$BACKUP_TARGET" /bin/sh "$script" || die "failed: ${script##*/}"
+            OC_BACKUP="$BACKUP_TARGET" OC_UPDATE="$UPDATE" OC_KEEP_WEB="$UPDATE" \
+            /bin/sh "$script" || die "failed: ${script##*/}"
         progress "$n" "$total"
     done
     write_state
@@ -393,7 +418,7 @@ run_step() {  # run_step installers/MODE/NN-name.sh
     OC_PAYLOAD="$PAYLOAD" OC_MODE="$MODE" OC_WEB_UI="$WEB" \
         OC_TOUCHSCREEN="$TOUCHSCREEN" OC_MACHINE="$MACHINE" OC_PID="$PID" \
         OC_KERNEL_PACKAGE="$KERNEL_PACKAGE" OC_NAN_ADDR="$NAN_ADDR" \
-        OC_BACKUP="$BACKUP_TARGET" OC_KEEP_WEB=1 /bin/sh "$PAYLOAD/$1" || die "failed: ${1##*/}"
+        OC_BACKUP="$BACKUP_TARGET" OC_UPDATE=1 OC_KEEP_WEB=1 /bin/sh "$PAYLOAD/$1" || die "failed: ${1##*/}"
 }
 # Update Configs: compares the choices with the install record and only
 # applies what differs. Nothing is backed up and nothing already installed
@@ -427,7 +452,7 @@ reconfigure() {
         if [ "$MODE" = tunnel ]; then
             steps="installers/tunnel/01-install-entware.sh installers/tunnel/10-install-tunnel.sh"
         else
-            steps="installers/soc/01-install-entware.sh installers/soc/02-install-loopscript.sh"
+            steps="installers/soc/01-install-entware.sh installers/soc/02-install-loopscript.sh installers/soc/05-install-python.sh"
             [ -f "$OC/klipper/klipper/klippy/klippy.py" ] && [ -x "$OC/klipper/klippy-env/bin/python" ] ||
                 steps="$steps installers/soc/10-install-stack.sh"
             # Tunnel installs leave FlashForge's own Moonraker in place.

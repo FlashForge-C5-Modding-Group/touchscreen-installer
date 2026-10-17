@@ -32,17 +32,17 @@ fi
 
 echo "STAGE Installing LoopScript"
 mkdir -p "$OCDIR"
+# Laid over the installed folders: extra files (custom startup scripts and
+# such) stay, see oc_overlay.
 for part in startup firmware tunneled moonraker fluidd; do
     [ -d "$FS/opencreator/$part" ] || continue
-    rm -rf "$OCDIR/$part"
-    cp -a "$FS/opencreator/$part" "$OCDIR/$part"
+    oc_overlay "$FS/opencreator/$part" "$OCDIR/$part" "$OCDIR/.installed/$part.md5"
 done
 cp "$FS/opencreator/version.txt" "$OCDIR/version.txt"
 chmod 755 "$OCDIR/startup/startup.sh" "$OCDIR"/startup/scripts/*.sh "$OCDIR/firmware/firmwareExe"
 chmod 644 "$OCDIR/tunneled/tunneled.sh"
 
-mkdir -p "$NGINX_CONF_D"
-cp "$FS"/nginx/conf.d/*.conf "$NGINX_CONF_D/"
+oc_overlay "$FS/nginx/conf.d" "$NGINX_CONF_D" "$OCDIR/.installed/nginx-conf.d.md5"
 
 if [ "$TOUCHSCREEN" = yes ] && [ ! -f "$GRUMPY_DIR/grumpyscreen.cfg" ]; then
     mkdir -p "$GRUMPY_DIR"

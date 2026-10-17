@@ -17,21 +17,25 @@ die() { echo "ERROR $*"; exit 1; }
 url=$(oc_github_latest_asset_url "$REPO" "$ASSET")
 [ -n "$url" ] || die "could not find a $ASSET release asset for $REPO"
 
+tag=$(basename "$(dirname "$url")")
 mkdir -p "$destination"
-if [ -f "$destination/grumpyscreen" ]; then
-    cp -p "$destination/grumpyscreen" "$OC_BACKUP/grumpyscreen.previous"
+if [ -f "$destination/grumpyscreen" ] &&
+    grep -q "\"version\": \"$tag\"" "$destination/release_info.json" 2>/dev/null; then
+    echo "STAGE GrumpyScreen $tag already installed"
+else
+    if [ -f "$destination/grumpyscreen" ]; then
+        cp -p "$destination/grumpyscreen" "$OC_BACKUP/grumpyscreen.previous"
+    fi
+    echo "STAGE Downloading latest GrumpyScreen release"
+    oc_download "$url" "$destination/grumpyscreen.new"
+    magic=$(dd if="$destination/grumpyscreen.new" bs=1 skip=1 count=3 2>/dev/null)
+    [ "$magic" = ELF ] || die "downloaded GrumpyScreen binary is not ELF"
+    chmod 755 "$destination/grumpyscreen.new"
+    mv "$destination/grumpyscreen.new" "$destination/grumpyscreen"
 fi
-
-echo "STAGE Downloading latest GrumpyScreen release"
-oc_download "$url" "$destination/grumpyscreen.new"
-magic=$(dd if="$destination/grumpyscreen.new" bs=1 skip=1 count=3 2>/dev/null)
-[ "$magic" = ELF ] || die "downloaded GrumpyScreen binary is not ELF"
-chmod 755 "$destination/grumpyscreen.new"
-mv "$destination/grumpyscreen.new" "$destination/grumpyscreen"
 
 # Moonraker's update manager ("executable" type) reads the installed version
 # from here and compares it with the latest release's tag.
-tag=$(basename "$(dirname "$url")")
 printf '{"project_name": "grumpyscreen", "project_owner": "%s", "version": "%s", "asset_name": "%s"}\n' \
     "${REPO%%/*}" "$tag" "$ASSET" > "$destination/release_info.json"
 MOONRAKER_CONF=$DEMO_ROOT/usr/data/opencreator/klipper/config/moonraker.conf

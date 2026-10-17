@@ -53,11 +53,18 @@ if [ -f "$APP_STARTUP" ] && grep -Eq "$LEGACY_RE" "$APP_STARTUP"; then
     trap - EXIT
 fi
 
-echo "STAGE Installing the OpenCreator boot logo"
 if [ -f "$LOGO" ] && [ ! -f "$OCDIR/logo.jpeg.stock" ]; then
     cp -p "$LOGO" "$OCDIR/logo.jpeg.stock"
 fi
-cp "$OC_PAYLOAD/common/logo.jpeg" "$LOGO"
+# A logo that is neither stock nor the one installed last time is the user's.
+if [ -f "$LOGO" ] && [ -f "$OCDIR/logo.jpeg.installed" ] &&
+    ! cmp -s "$LOGO" "$OCDIR/logo.jpeg.installed" && ! cmp -s "$LOGO" "$OCDIR/logo.jpeg.stock"; then
+    echo "STAGE Keeping your custom boot logo"
+else
+    echo "STAGE Installing the OpenCreator boot logo"
+    cp "$OC_PAYLOAD/common/logo.jpeg" "$LOGO"
+    cp "$OC_PAYLOAD/common/logo.jpeg" "$OCDIR/logo.jpeg.installed"
+fi
 
 echo "STAGE Replacing firmwareExe with the LoopScript launcher"
 mkdir -p "$(dirname "$FIRMWARE_EXE")"

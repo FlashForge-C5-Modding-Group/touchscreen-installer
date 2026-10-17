@@ -22,9 +22,11 @@ install_zip_release() {  # install_zip_release REPO ASSET DEST
     WORK=$(mktemp -d "${TMPDIR:-/tmp}/oc-web.XXXXXX") || die "cannot create work directory"
     echo "STAGE Downloading $asset from $repo"
     oc_download "$url" "$WORK/$asset" || { rm -rf "$WORK"; die "download failed: $asset"; }
-    rm -rf "$dest"
-    mkdir -p "$dest"
-    unzip -oq "$WORK/$asset" -d "$dest" || { rm -rf "$WORK"; die "cannot unpack $asset"; }
+    mkdir -p "$WORK/unpacked"
+    unzip -oq "$WORK/$asset" -d "$WORK/unpacked" || { rm -rf "$WORK"; die "cannot unpack $asset"; }
+    # Laid over the installed UI, so files the user added (custom config.json
+    # and such) stay.
+    oc_overlay "$WORK/unpacked" "$dest" "$DEMO_ROOT/usr/data/opencreator/.installed/${asset%.zip}.md5" nosave
     rm -rf "$WORK"
 }
 

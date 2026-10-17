@@ -94,3 +94,38 @@ oc_swap_off() {
     swapoff "$OC_SWAPFILE" 2>/dev/null || true
     rm -f "$OC_SWAPFILE"
 }
+
+# oc_overlay SRC DEST MANIFEST [nosave]
+# Copies SRC's files over DEST and keeps every other file in DEST (user
+# additions). MANIFEST records "md5  path" for what was installed: a file
+# listed there that SRC no longer has is removed only if it is unchanged.
+# A file the user changed is saved under $OC_BACKUP/overlay before it is
+# replaced (not with nosave, for build output like the web UIs).
+oc_overlay() {
+    local src=$1 dest=$2 manifest=$3 save=${4:-save} new f sum
+    new=$manifest.new
+    mkdir -p "$dest" "$(dirname "$manifest")"
+    : > "$new"
+    (cd "$src" && find . -type f | sed 's#^\./##') | while IFS= read -r f; do
+        if [ "$save" = save ] && [ -f "$dest/$f" ] && ! cmp -s "$src/$f" "$dest/$f"; then
+            sum=$(md5sum < "$dest/$f" | cut -d' ' -f1)
+            if ! grep -qx "$sum  $f" "$manifest" 2>/dev/null; then
+                mkdir -p "$OC_BACKUP/overlay$dest/$(dirname "$f")"
+                cp -p "$dest/$f" "$OC_BACKUP/overlay$dest/$f"
+                echo "STAGE Saved your changed $dest/$f to the backup"
+            fi
+        fi
+        mkdir -p "$dest/$(dirname "$f")"
+        cp -p "$src/$f" "$dest/$f.oc-new" && mv "$dest/$f.oc-new" "$dest/$f"
+        echo "$(md5sum < "$src/$f" | cut -d' ' -f1)  $f" >> "$new"
+    done
+    if [ -f "$manifest" ]; then
+        while IFS= read -r line; do
+            f=${line#*  }
+            [ -f "$src/$f" ] || [ ! -f "$dest/$f" ] && continue
+            [ "$(md5sum < "$dest/$f" | cut -d' ' -f1)  $f" = "$line" ] && rm -f "$dest/$f"
+        done < "$manifest"
+    fi
+    mv "$new" "$manifest"
+    return 0
+}

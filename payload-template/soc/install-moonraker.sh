@@ -1,6 +1,7 @@
 #!/bin/sh
 # Printer SoC mode: current Moonraker in /usr/prog/moonraker/moonraker with
-# a virtualenv on Entware's Python (Creator-5-Mods "Update Moonraker").
+# a virtualenv on the hard-float Python in /usr/data/python-hf. pip builds
+# its C extensions with python-hf's gcc wrapper, so they are hard-float too.
 # LoopScript's 20-msmr.sh starts it with -d /usr/data/opencreator/klipper.
 set -eu
 : "${OC_PAYLOAD:?}"
@@ -9,6 +10,7 @@ DEMO_ROOT=${OC_DEMO_ROOT:-}
 . "$OC_PAYLOAD/common/install-helpers.sh"
 
 MR=$DEMO_ROOT/usr/prog/moonraker
+PYHF=$DEMO_ROOT/usr/data/python-hf
 MOONRAKER_REPO=https://github.com/Arksine/moonraker.git
 
 die() { echo "ERROR $*"; exit 1; }
@@ -28,15 +30,11 @@ for dir in moonraker moonraker-env; do
 done
 rm -rf "$MR/moonraker.new"
 
-echo "STAGE Downloading Moonraker"
-oc_git_clone_shallow "$MOONRAKER_REPO" "$MR/moonraker.new" || die "cannot download Moonraker"
-
-# The current Moonraker and its environment are moved aside and put back if
-# anything below fails.
-rm -rf "$MR/moonraker.old" "$MR/moonraker-env.old"
-[ ! -d "$MR/moonraker" ] || mv "$MR/moonraker" "$MR/moonraker.old"
-[ ! -d "$MR/moonraker-env" ] || mv "$MR/moonraker-env" "$MR/moonraker-env.old"
-mv "$MR/moonraker.new" "$MR/moonraker"
+# Arksine's Moonraker is updated in place (untracked files stay) and reset to
+# its old commit on failure; anything else (FlashForge's) is moved aside and
+# replaced, and put back on failure. A new environment is likewise built
+# with the current one moved aside.
+OLD_HEAD=
 rollback() {
     for dir in moonraker moonraker-env; do
         if [ -d "$MR/$dir.old" ]; then
@@ -44,24 +42,45 @@ rollback() {
             mv "$MR/$dir.old" "$MR/$dir"
         fi
     done
+    [ -z "$OLD_HEAD" ] || git -C "$MR/moonraker" reset -q --hard "$OLD_HEAD" || true
 }
 trap 'rc=$?; oc_swap_off; [ $rc -eq 0 ] || rollback' EXIT
+rm -rf "$MR/moonraker.old" "$MR/moonraker-env.old"
+
+if git -C "$MR/moonraker" remote get-url origin 2>/dev/null | grep -q Arksine; then
+    echo "STAGE Updating Moonraker in place"
+    OLD_HEAD=$(git -C "$MR/moonraker" rev-parse HEAD) || die "cannot read the Moonraker checkout"
+    git -C "$MR/moonraker" fetch --depth 1 origin || die "cannot download Moonraker"
+    git -C "$MR/moonraker" reset -q --hard FETCH_HEAD || die "cannot update Moonraker"
+else
+    echo "STAGE Downloading Moonraker"
+    oc_git_clone_shallow "$MOONRAKER_REPO" "$MR/moonraker.new" || die "cannot download Moonraker"
+    [ ! -d "$MR/moonraker" ] || mv "$MR/moonraker" "$MR/moonraker.old"
+    mv "$MR/moonraker.new" "$MR/moonraker"
+fi
 
 if [ -n "$DEMO_ROOT" ]; then
-    echo "STAGE Demo mode: would create $MR/moonraker-env with" \
-         "/opt/bin/python3 -m virtualenv --system-site-packages and install" \
-         "scripts/moonraker-requirements.txt and lmdb"
+    echo "STAGE Demo mode: would create $MR/moonraker-env with python-hf -m venv" \
+         "--system-site-packages and install scripts/moonraker-requirements.txt"
 else
-    echo "STAGE Creating Moonraker's Python environment"
-    /opt/bin/python3 -m virtualenv --system-site-packages -p /opt/bin/python3 "$MR/moonraker-env" \
-        || die "cannot create $MR/moonraker-env"
+    [ -x "$PYHF/bin/python3.13" ] || die "hard-float Python is not installed"
+    if grep -qx "home = /usr/data/python-hf/bin" "$MR/moonraker-env/pyvenv.cfg" 2>/dev/null; then
+        echo "STAGE Moonraker's Python environment is on hard-float Python"
+    else
+        echo "STAGE Creating Moonraker's Python environment"
+        [ ! -d "$MR/moonraker-env" ] || mv "$MR/moonraker-env" "$MR/moonraker-env.old"
+        "$PYHF/bin/python3.13" -m venv --system-site-packages "$MR/moonraker-env" \
+            || die "cannot create $MR/moonraker-env"
+    fi
     echo "STAGE Installing Moonraker's Python packages (this takes a while)"
     oc_swap_on
-    oc_run_staged env SKIP_CYTHON=1 "$MR/moonraker-env/bin/python" -m pip install -r "$MR/moonraker/scripts/moonraker-requirements.txt" \
+    # SKIP_CYTHON: zeroconf as plain Python, not compiled. Pillow looks for
+    # zlib and libjpeg in CFLAGS/LDFLAGS, not in the gcc wrapper's paths.
+    oc_run_staged env SKIP_CYTHON=1 CFLAGS="-I$PYHF/include" LDFLAGS="-L$PYHF/lib" \
+        "$MR/moonraker-env/bin/python" -m pip install \
+        --disable-pip-version-check -r "$MR/moonraker/scripts/moonraker-requirements.txt" \
         || die "Moonraker requirements failed"
-    oc_run_staged env SKIP_CYTHON=1 LMDB_FORCE_SYSTEM=1 "$MR/moonraker-env/bin/python" -m pip install --no-build-isolation lmdb \
-        || echo "STAGE lmdb not installed (only needed to migrate an old Moonraker database)"
-    "$MR/moonraker-env/bin/python" -c 'import tornado, sqlite3, jinja2' \
+    "$MR/moonraker-env/bin/python" -c 'import tornado, sqlite3, ssl, jinja2, PIL, libnacl.sign, streaming_form_data' \
         || die "Moonraker's environment is incomplete"
     git -C "$MR/moonraker" config core.fileMode false
 fi

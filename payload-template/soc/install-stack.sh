@@ -1,6 +1,7 @@
 #!/bin/sh
 # Printer SoC mode: Kalico in /usr/data/opencreator/klipper/klipper with a
-# virtualenv on Entware's Python, and the opencreator-fs printer config in
+# virtualenv on the hard-float Python in /usr/data/python-hf
+# (install-python.sh), and the opencreator-fs printer config in
 # /usr/data/opencreator/klipper/config.
 set -eu
 : "${OC_PAYLOAD:?}"
@@ -9,78 +10,98 @@ DEMO_ROOT=${OC_DEMO_ROOT:-}
 . "$OC_PAYLOAD/common/install-helpers.sh"
 
 OC=$DEMO_ROOT/usr/data/opencreator/klipper
+PYHF=$DEMO_ROOT/usr/data/python-hf
 KALICO_REPO=${OC_KALICO_REPO:-https://github.com/FlashForge-C5-Modding-Group/kalico.git}
 KALICO_BRANCH=${OC_KALICO_BRANCH:-something}
 OPENCREATOR_FS_REPO=${OC_FS_REPO:-https://github.com/FlashForge-C5-Modding-Group/opencreator-fs.git}
 
 die() { echo "ERROR $*"; exit 1; }
 
-# New Kalico and its environment are built next to the current ones and only
-# swapped in once everything has worked; on failure the current ones stay.
+WORK=$(mktemp -d "${TMPDIR:-/tmp}/oc-fs.XXXXXX") || die "cannot create work directory"
+KLIPPER=$OC/klipper
+
+# A fresh Kalico or environment is built next to the current one and
+# only swapped in once everything has worked; an existing Kalico checkout is
+# updated in place (user files such as AFC's links in klippy/extras stay) and
+# reset to its old commit on failure.
+OLD_HEAD=
 rollback() {
     rm -rf "$OC/klipper.new"
     if [ -d "$OC/klippy-env.old" ]; then
         rm -rf "$OC/klippy-env"
         mv "$OC/klippy-env.old" "$OC/klippy-env"
     fi
+    [ -z "$OLD_HEAD" ] || git -C "$OC/klipper" reset -q --hard "$OLD_HEAD" || true
 }
-trap 'rc=$?; oc_swap_off; [ $rc -eq 0 ] || rollback' EXIT
+trap 'rc=$?; oc_swap_off; rm -rf "$WORK"; [ $rc -eq 0 ] || rollback' EXIT
 
 # A previous run that was interrupted (power loss) left the original aside.
-for dir in klipper klippy-env; do
-    if [ -d "$OC/$dir.old" ]; then
-        echo "STAGE Putting back $dir from an interrupted install"
-        rm -rf "$OC/$dir"
-        mv "$OC/$dir.old" "$OC/$dir"
+for dir in "$OC/klipper" "$OC/klippy-env"; do
+    if [ -d "$dir.old" ]; then
+        echo "STAGE Putting back ${dir##*/} from an interrupted install"
+        rm -rf "$dir"
+        mv "$dir.old" "$dir"
     fi
 done
 
-echo "STAGE Downloading Kalico ($KALICO_BRANCH)"
-oc_git_clone_shallow "$KALICO_REPO" "$OC/klipper.new" "$KALICO_BRANCH" \
-    || die "cannot download Kalico"
+echo "STAGE Downloading the OpenCreator files"
+oc_git_clone_shallow "$OPENCREATOR_FS_REPO" "$WORK/opencreator-fs" \
+    || die "cannot download opencreator-fs"
 
-if [ -n "$DEMO_ROOT" ]; then
-    echo "STAGE Demo mode: would create $OC/klippy-env with" \
-         "/opt/bin/python3 -m virtualenv --system-site-packages, pip-install" \
-         "any missing Klippy modules and build klippy/chelper"
-else
-    echo "STAGE Creating Kalico's Python environment"
-    /opt/bin/python3 -m virtualenv --version >/dev/null 2>&1 ||
-        oc_run_staged /opt/bin/python3 -m pip install virtualenv || die "cannot install virtualenv"
-    rm -rf "$OC/klippy-env.old"
-    [ ! -d "$OC/klippy-env" ] || mv "$OC/klippy-env" "$OC/klippy-env.old"
-    /opt/bin/python3 -m virtualenv --system-site-packages -p /opt/bin/python3 "$OC/klippy-env" \
-        || die "cannot create $OC/klippy-env"
-    # Only what Klippy imports, unpinned: the pinned requirements would make
-    # pip build numpy from source on the printer.
-    missing=
-    for pair in cffi:cffi greenlet:greenlet jinja2:jinja2 markupsafe:markupsafe serial:pyserial; do
-        "$OC/klippy-env/bin/python" -c "import ${pair%%:*}" 2>/dev/null || missing="$missing ${pair#*:}"
-    done
-    if [ -n "$missing" ]; then
-        echo "STAGE Installing Python packages:$missing (this takes a while)"
-        oc_swap_on
-        # shellcheck disable=SC2086
-        oc_run_staged "$OC/klippy-env/bin/python" -m pip install $missing || die "pip install$missing failed"
+if git -C "$OC/klipper" remote get-url origin 2>/dev/null | grep -qi 'kalico'; then
+    echo "STAGE Updating Kalico ($KALICO_BRANCH) in place"
+    OLD_HEAD=$(git -C "$OC/klipper" rev-parse HEAD) || die "cannot read the Kalico checkout"
+    # Changes to Kalico's own files are lost by the update; keep a patch.
+    if ! git -C "$OC/klipper" diff --quiet HEAD 2>/dev/null; then
+        git -C "$OC/klipper" diff HEAD > "$OC_BACKUP/kalico-local-changes.patch"
+        echo "STAGE Your changes to Kalico's files are saved in $OC_BACKUP/kalico-local-changes.patch"
     fi
-    echo "STAGE Building Kalico's C helper"
-    (cd "$OC/klipper.new/klippy" && "$OC/klippy-env/bin/python" -c 'import chelper; chelper.get_ffi()') \
-        || die "c_helper.so build failed; check /opt/bin/gcc and /opt/include"
+    git -C "$OC/klipper" remote set-url origin "$KALICO_REPO"
+    git -C "$OC/klipper" fetch --depth 1 origin "$KALICO_BRANCH" || die "cannot download Kalico"
+    git -C "$OC/klipper" reset -q --hard FETCH_HEAD || die "cannot update Kalico"
+else
+    echo "STAGE Downloading Kalico ($KALICO_BRANCH)"
+    oc_git_clone_shallow "$KALICO_REPO" "$OC/klipper.new" "$KALICO_BRANCH" \
+        || die "cannot download Kalico"
+    KLIPPER=$OC/klipper.new
 fi
 
-echo "STAGE Installing Kalico to $OC/klipper"
-rm -rf "$OC/klipper.old"
-[ ! -d "$OC/klipper" ] || mv "$OC/klipper" "$OC/klipper.old"
-mv "$OC/klipper.new" "$OC/klipper"
+if [ -n "$DEMO_ROOT" ]; then
+    echo "STAGE Demo mode: would create $OC/klippy-env with python-hf -m venv" \
+         "--without-pip --system-site-packages and build klippy/chelper"
+else
+    [ -x "$PYHF/bin/python3.13" ] || die "hard-float Python is not installed"
+    if grep -qx "home = /usr/data/python-hf/bin" "$OC/klippy-env/pyvenv.cfg" 2>/dev/null; then
+        echo "STAGE Kalico's Python environment is up to date"
+    else
+        echo "STAGE Creating Kalico's Python environment"
+        rm -rf "$OC/klippy-env.old"
+        [ ! -d "$OC/klippy-env" ] || mv "$OC/klippy-env" "$OC/klippy-env.old"
+        "$PYHF/bin/python3.13" -m venv --without-pip --system-site-packages "$OC/klippy-env" \
+            || die "cannot create $OC/klippy-env"
+        # A c_helper.so from the old (soft-float) Python cannot be loaded.
+        rm -f "$KLIPPER/klippy/chelper/c_helper.so"
+    fi
+
+    echo "STAGE Building Kalico's C helper"
+    # python-hf's cc/bin/gcc builds hard-float code with Entware's gcc; it
+    # only rebuilds when the sources changed.
+    (cd "$KLIPPER/klippy" && PATH="$PYHF/cc/bin:/opt/bin:$PATH" \
+        "$OC/klippy-env/bin/python" -c 'import chelper; chelper.get_ffi()') \
+        || die "c_helper.so build failed; check /opt/bin/gcc"
+fi
+
+if [ "$KLIPPER" = "$OC/klipper.new" ]; then
+    echo "STAGE Installing Kalico to $OC/klipper"
+    rm -rf "$OC/klipper.old"
+    [ ! -d "$OC/klipper" ] || mv "$OC/klipper" "$OC/klipper.old"
+    mv "$OC/klipper.new" "$OC/klipper"
+fi
 rm -rf "$OC/klipper.old" "$OC/klippy-env.old"
-trap - EXIT
+trap 'rm -rf "$WORK"' EXIT
 oc_swap_off
 
 echo "STAGE Installing the OpenCreator printer config"
-WORK=$(mktemp -d "${TMPDIR:-/tmp}/oc-fs.XXXXXX") || die "cannot create work directory"
-trap 'rm -rf "$WORK"' EXIT
-oc_git_clone_shallow "$OPENCREATOR_FS_REPO" "$WORK/opencreator-fs" \
-    || die "cannot download opencreator-fs"
 TEMPLATE=$WORK/opencreator-fs/fs/usr/data/config
 mkdir -p "$OC/config" "$OC/logs"
 (cd "$TEMPLATE" && find . -type d) | while IFS= read -r dir; do

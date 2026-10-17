@@ -14,9 +14,8 @@ ENTWARE=http://bin.entware.net/mipselsf-k3.4
 PACKAGES="git git-http curl ca-bundle gcc tar xz"
 case "$OC_MODE" in
 soc)
-    PACKAGES="$PACKAGES python3 python3-pip python3-dev python3-pillow python3-numpy
-python3-msgpack python3-cryptography python3-cffi python3-yaml python3-requests
-python3-setuptools libsodium libffi lmdb swap-utils"
+    # Python (and its libraries) come from python-hf, which is hard-float.
+    PACKAGES="$PACKAGES swap-utils"
     ;;
 tunnel)
     PACKAGES="$PACKAGES socat"
@@ -74,11 +73,6 @@ if [ ! -f /opt/include/stdio.h ]; then
         || die "header download failed"
 fi
 
-if [ "$OC_MODE" = soc ]; then
-    sodium=$(ls /opt/lib/libsodium.so.*[0-9] 2>/dev/null | head -n 1)
-    [ -n "$sodium" ] && ln -sf "$sodium" /opt/lib/libsodium.so
-    [ -x /opt/bin/python3 ] || die "Entware python3 missing"
-fi
 [ "$OC_MODE" != tunnel ] || [ -x /opt/bin/socat ] || die "Entware socat missing"
 [ -x /opt/bin/git ] || die "Entware git missing"
 [ -x /opt/bin/gcc ] || die "Entware gcc missing"
