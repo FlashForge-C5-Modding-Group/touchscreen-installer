@@ -74,12 +74,22 @@ else
     fi
     echo "STAGE Installing Moonraker's Python packages (this takes a while)"
     oc_swap_on
+    # Wheels Entware's Python 3.13 built carry the same tag (cp313
+    # linux_mips) but are soft-float: hard-float pip gets its own cache, and
+    # the old one goes.
+    rm -rf "$HOME/.cache/pip"
     # SKIP_CYTHON: zeroconf as plain Python, not compiled. Pillow looks for
     # zlib and libjpeg in CFLAGS/LDFLAGS, not in the gcc wrapper's paths.
     oc_run_staged env SKIP_CYTHON=1 CFLAGS="-I$PYHF/include" LDFLAGS="-L$PYHF/lib" \
-        "$MR/moonraker-env/bin/python" -m pip install \
+        PIP_CACHE_DIR="$HOME/.cache/pip-hf" "$MR/moonraker-env/bin/python" -m pip install \
         --disable-pip-version-check -r "$MR/moonraker/scripts/moonraker-requirements.txt" \
         || die "Moonraker requirements failed"
+    if [ -x /opt/bin/readelf ]; then
+        for so in $(find "$MR/moonraker-env" -name '*.so'); do
+            /opt/bin/readelf -A "$so" 2>/dev/null | grep -q 'Hard float' ||
+                die "not hard-float: ${so#$MR/moonraker-env/}"
+        done
+    fi
     "$MR/moonraker-env/bin/python" -c 'import tornado, sqlite3, ssl, jinja2, PIL, libnacl.sign, streaming_form_data' \
         || die "Moonraker's environment is incomplete"
     git -C "$MR/moonraker" config core.fileMode false

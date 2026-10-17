@@ -16,7 +16,7 @@
 
 enum page { PAGE_CHECK, PAGE_MODE, PAGE_WEB, PAGE_TOUCHSCREEN, PAGE_READY,
             PAGE_RUNNING, PAGE_DONE, PAGE_ERROR, PAGE_RESTORE, PAGE_KERNEL,
-            PAGE_INSTALLED, PAGE_ROLLBACK };
+            PAGE_INSTALLED, PAGE_ROLLBACK, PAGE_UPDATE };
 static enum page page_now;
 static const char *payload_path, *backup_path, *script_path;
 static const char *mode = "soc", *web = "fluidd";
@@ -44,6 +44,11 @@ static char installer_version[32] = "?";
 static char mcu_drive[48] = "none", mcu_boards[48] = "none";
 static lv_obj_t *version_label;
 static uint64_t running_since, splash_until;
+/* The running step (from install.sh's "Running NN-name.sh" and PROGRESS
+ * lines), shown next to the Log button; run_secs is the finished run's time. */
+static char step_name[48];
+static int step_done, step_total;
+static unsigned run_secs;
 static char machine[32] = "unknown";
 static bool model_known;
 static char backup_found[512];
@@ -53,6 +58,9 @@ static char stock_found[512];
  * what changed, via the "reconfigure" action). */
 static char prev_version[32], prev_mode[16], prev_web[16], prev_touch[8];
 static bool installed_same, update_configs;
+/* An install record from a different installer version: the start page is
+ * "Update available", which reinstalls with the recorded setup. */
+static bool update_available;
 static bool space_low;
 /* FlashForge firmware version; Tunneled needs 1.9.9 or newer. */
 static char ff_version[32] = "unknown";
@@ -105,6 +113,7 @@ static const char *page_icon(enum page p)
     case PAGE_READY: return LV_SYMBOL_PLAY;
     case PAGE_RESTORE:
     case PAGE_ROLLBACK: return LV_SYMBOL_LOOP;
+    case PAGE_UPDATE: return LV_SYMBOL_UPLOAD;
     default:         return LV_SYMBOL_HOME;
     }
 }
@@ -134,6 +143,31 @@ static void set_status(const char *message)
 {
     lv_label_set_text(status_label, message);
     lv_obj_set_style_text_color(status_label, lv_color_hex(OC_COLOR_ACCENT), 0);
+}
+
+/* "15-install-moonraker.sh" -> "Moonraker" for the label next to Log. */
+static void set_step_name(const char *script)
+{
+    static const char *const names[][2] = {
+        {"install-entware", "Entware"}, {"install-loopscript", "LoopScript"},
+        {"install-python", "Python"}, {"install-stack", "Kalico"},
+        {"install-moonraker", "Moonraker"}, {"install-web", "Web UI"},
+        {"install-grumpyscreen", "Touchscreen"}, {"install-tunnel", "Tunnel bridge"},
+        {"enable-root", "Root login"}, {"activate-loopscript", "Activating"},
+        {"flash-mcu-firmware", "MCU firmware"},
+    };
+    const char *base = strrchr(script, '/');
+    base = base ? base + 1 : script;
+    const char *dash = strchr(base, '-');
+    if (dash && dash - base <= 3) base = dash + 1;   /* drop the "NN-" order prefix */
+    size_t len = strcspn(base, ".");
+    for (size_t i = 0; i < sizeof(names) / sizeof(names[0]); i++) {
+        if (strlen(names[i][0]) == len && strncmp(base, names[i][0], len) == 0) {
+            snprintf(step_name, sizeof(step_name), "%s", names[i][1]);
+            return;
+        }
+    }
+    snprintf(step_name, sizeof(step_name), "%.*s", (int)(len < 40 ? len : 40), base);
 }
 
 static void set_status_error(const char *message)
@@ -208,6 +242,7 @@ static void clear_buttons(void)
 }
 
 static void show_page(enum page next);
+static void format_duration(char *buf, size_t size, unsigned secs);
 
 static void update_brand(void)
 {
@@ -264,11 +299,13 @@ static void start_action(const char *action)
         splash_until = now_ms() + 1500;
         backup_found[0] = '\0';
         stock_found[0] = '\0';
-        installed_same = update_configs = space_low = tunnel_blocked = false;
+        installed_same = update_configs = update_available = space_low = tunnel_blocked = false;
         prev_version[0] = '\0';
     } else {
         lv_bar_set_range(progress_bar, 0, 1);
         lv_bar_set_value(progress_bar, 0, LV_ANIM_OFF);
+        step_name[0] = '\0';
+        step_done = step_total = 0;
         running_since = now_ms();
         show_page(PAGE_RUNNING);
     }
@@ -305,7 +342,15 @@ static void action_button(lv_event_t *event)
         demo_root = NULL; setenv("OC_SKIP_BACKUP", "1", 1); start_action("install");
     } else if (strcmp(action, "demo-install") == 0) {
         demo_root = OC_DEMO_INSTALL_ROOT; unsetenv("OC_SKIP_BACKUP"); start_action("install");
-    } else if (strcmp(action, "recovery") == 0) {
+    } else if (strcmp(action, "update") == 0 || strcmp(action, "update-nobackup") == 0) {
+        /* Same setup as the install record, no questions asked. */
+        mode = prev_mode; web = prev_web; touchscreen = prev_touch;
+        demo_root = NULL;
+        if (strcmp(action, "update") == 0) unsetenv("OC_SKIP_BACKUP");
+        else setenv("OC_SKIP_BACKUP", "1", 1);
+        start_action("install");
+    } else if (strcmp(action, "update-home") == 0) show_page(PAGE_UPDATE);
+    else if (strcmp(action, "recovery") == 0 || strcmp(action, "change-setup") == 0) {
         update_configs = false; show_page(PAGE_MODE);
     } else if (strcmp(action, "update-configs") == 0) {
         update_configs = true;
@@ -319,7 +364,8 @@ static void action_button(lv_event_t *event)
     else if (strcmp(action, "rollback-confirm") == 0) show_page(PAGE_ROLLBACK);
     else if (strcmp(action, "rollback") == 0) { demo_root = NULL; start_action("rollback"); }
     else if (strcmp(action, "start") == 0)
-        show_page(installed_same && model_known ? PAGE_INSTALLED : PAGE_MODE);
+        show_page(installed_same && model_known ? PAGE_INSTALLED
+                  : update_available && model_known ? PAGE_UPDATE : PAGE_MODE);
     else if (strcmp(action, "restore") == 0) { demo_root = NULL; start_action("restore"); }
     else if (strcmp(action, "restart") == 0) {
         demo_root = NULL; show_page(PAGE_CHECK); start_action("check");
@@ -359,7 +405,9 @@ static lv_obj_t *add_button(const char *text, const char *action)
                      strcmp(action, "home") == 0 || strcmp(action, "recovery") == 0 ||
                      strcmp(action, "rollback-confirm") == 0 || strcmp(action, "start") == 0 ||
                      strcmp(action, "restore-confirm") == 0 || strcmp(action, "mainsail") == 0 ||
-                     strcmp(action, "install-nobackup") == 0;
+                     strcmp(action, "install-nobackup") == 0 ||
+                     strcmp(action, "update-nobackup") == 0 ||
+                     strcmp(action, "update-home") == 0 || strcmp(action, "change-setup") == 0;
     return make_button(button_row, text, action, !secondary, 220, 58);
 }
 
@@ -401,6 +449,12 @@ static void show_page(enum page next)
     } else {
         step_buf[0] = '\0';
     }
+    if ((next == PAGE_DONE || next == PAGE_ERROR) && strcmp(current_action, "check") != 0) {
+        char took[16];
+        format_duration(took, sizeof(took), run_secs);
+        snprintf(step_buf, sizeof(step_buf), "%s %s",
+                 next == PAGE_DONE ? "Finished in" : "Stopped after", took);
+    }
     lv_label_set_text(step_label, step_buf);
     bool restoring = strcmp(current_action, "restore") == 0;
     bool reconfiguring = strcmp(current_action, "reconfigure") == 0;
@@ -425,8 +479,41 @@ static void show_page(enum page next)
         }
         add_button("Check again", "restart");
         break;
+    case PAGE_UPDATE:
+        {
+            static char title[96], from_to[80], setup[96];
+            bool tunnel = strcmp(prev_mode, "tunnel") == 0;
+            snprintf(title, sizeof(title), "Update available:  %s  " LV_SYMBOL_RIGHT "  %s",
+                     prev_version, installer_version);
+            set_title(next, title);
+            lv_label_set_text(body_label,
+                "Updates OpenCreator in place with your current setup. Your configs and "
+                "files are kept; OpenCreator files you changed are saved to the backup.");
+            lv_obj_clear_flag(summary_box, LV_OBJ_FLAG_HIDDEN);
+            add_summary_row("Installed", prev_version);
+            snprintf(from_to, sizeof(from_to), "%s (new)", installer_version);
+            add_summary_row("This installer", from_to);
+            snprintf(setup, sizeof(setup), "%s%s%s, touchscreen %s",
+                     tunnel ? "Tunneled" : "Printer SoC", tunnel ? "" : ", ",
+                     tunnel ? "" : prev_web, strcmp(prev_touch, "yes") == 0 ? "on" : "off");
+            add_summary_row("Setup kept", setup);
+            if (warn_text[0]) {
+                lv_label_set_text_static(notice_label, warn_text);
+                lv_obj_clear_flag(notice_label, LV_OBJ_FLAG_HIDDEN);
+            }
+            add_button("Change setup", "change-setup");
+            lv_obj_t *nobackup = add_button("Update without backup", "update-nobackup");
+            lv_obj_t *update = add_button(LV_SYMBOL_UPLOAD "  Back up and update", "update");
+            /* Tunneled needs FlashForge 1.9.9; the backend refuses it too. */
+            if (tunnel && tunnel_blocked) {
+                disable_button(nobackup);
+                disable_button(update);
+            }
+            if (stock_found[0]) add_button(LV_SYMBOL_REFRESH "  Rollback to stock", "rollback-confirm");
+        }
+        break;
     case PAGE_INSTALLED:
-        set_title(next, "OpenCreator is installed");
+        set_title(next, "OpenCreator is up to date");
         {
             static char buf[400];
             snprintf(buf, sizeof(buf),
@@ -461,6 +548,7 @@ static void show_page(enum page next)
             lv_obj_clear_flag(notice_label, LV_OBJ_FLAG_HIDDEN);
         }
         if (installed_same) add_button("Back", "home");
+        else if (update_available && model_known) add_button("Back", "update-home");
         add_button("On printer SoC", "soc");
         {
             lv_obj_t *tunnel = add_button("Tunneled", "tunnel");
@@ -680,6 +768,7 @@ static void process_line(char *line)
         sscanf(line + 4, "%47s %47s", mcu_drive, mcu_boards);
         update_version();
     }
+    if (strncmp(line, "STAGE Running ", 14) == 0) set_step_name(line + 14);
     if (strncmp(line, "STAGE ", 6) == 0) set_status(line + 6);
     else if (strncmp(line, "ERROR ", 6) == 0) set_status_error(line + 6);
     else if (strncmp(line, "MODEL ", 6) == 0) {
@@ -695,9 +784,12 @@ static void process_line(char *line)
                  len ? "\n" : "", line + 5);
     } else if (strncmp(line, "PREVIOUS ", 9) == 0) {
         sscanf(line + 9, "%31s %15s %15s %7s", prev_version, prev_mode, prev_web, prev_touch);
-        installed_same = strcmp(prev_version, installer_version) == 0 &&
-                         (strcmp(prev_mode, "soc") == 0 || strcmp(prev_mode, "tunnel") == 0) &&
-                         (strcmp(prev_touch, "yes") == 0 || strcmp(prev_touch, "no") == 0);
+        bool valid = (strcmp(prev_mode, "soc") == 0 || strcmp(prev_mode, "tunnel") == 0) &&
+                     (strcmp(prev_touch, "yes") == 0 || strcmp(prev_touch, "no") == 0) &&
+                     (strcmp(prev_mode, "tunnel") == 0 || strcmp(prev_web, "fluidd") == 0 ||
+                      strcmp(prev_web, "mainsail") == 0);
+        installed_same = valid && strcmp(prev_version, installer_version) == 0;
+        update_available = valid && !installed_same;
     } else if (strncmp(line, "FIRMWARE ", 9) == 0) {
         int a = 0, b = 0, c = 0;
         snprintf(ff_version, sizeof(ff_version), "%.30s", line + 9);
@@ -715,10 +807,8 @@ static void process_line(char *line)
         if (sscanf(line + 9, "%d %d", &n, &total) == 2 && total > 0 && n >= 0) {
             lv_bar_set_range(progress_bar, 0, total);
             lv_bar_set_value(progress_bar, n > total ? total : n, LV_ANIM_ON);
-            /* PROGRESS n means n steps are done, so step n + 1 is running. */
-            static char step_buf[32];
-            snprintf(step_buf, sizeof(step_buf), "Step %d of %d", n < total ? n + 1 : total, total);
-            if (page_now == PAGE_RUNNING) lv_label_set_text(step_label, step_buf);
+            step_done = n;
+            step_total = total;
         }
     }
 }
@@ -751,22 +841,42 @@ static void poll_child(void)
     close(child_fd);
     child_fd = -1;
     child_pid = -1;
+    run_secs = (unsigned)((now_ms() - running_since) / 1000u);
     sync_log_files();
     if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
         show_page(PAGE_ERROR);
     } else if (strcmp(current_action, "check") == 0) {
         show_page(!kernel_ok ? PAGE_KERNEL
-                  : installed_same && model_known ? PAGE_INSTALLED : PAGE_MODE);
+                  : installed_same && model_known ? PAGE_INSTALLED
+                  : update_available && model_known ? PAGE_UPDATE : PAGE_MODE);
     } else {
         show_page(PAGE_DONE);
     }
 }
 
+/* m:ss, or h:mm:ss from an hour on. */
+static void format_duration(char *buf, size_t size, unsigned secs)
+{
+    if (secs >= 3600u)
+        snprintf(buf, size, "%u:%02u:%02u", secs / 3600u, secs / 60u % 60u, secs % 60u);
+    else
+        snprintf(buf, size, "%u:%02u", secs / 60u, secs % 60u);
+}
+
+/* "Moonraker · Step 5/10 · 12:34" next to the Log button while running. */
 static void update_elapsed(void)
 {
-    static char buf[32];
-    unsigned secs = (unsigned)((now_ms() - running_since) / 1000u);
-    snprintf(buf, sizeof(buf), "Elapsed %u:%02u", secs / 60u, secs % 60u);
+    static char buf[128];
+    char took[16];
+    format_duration(took, sizeof(took), (unsigned)((now_ms() - running_since) / 1000u));
+    if (step_total > 0) {
+        /* PROGRESS n means n steps are done, so step n + 1 is running. */
+        int step = step_done < step_total ? step_done + 1 : step_total;
+        snprintf(buf, sizeof(buf), "%s%sStep %d/%d  " LV_SYMBOL_BULLET "  %s", step_name,
+                 step_name[0] ? "  " LV_SYMBOL_BULLET "  " : "", step, step_total, took);
+    } else {
+        snprintf(buf, sizeof(buf), "Elapsed %s", took);
+    }
     if (strcmp(lv_label_get_text(step_label), buf) != 0)
         lv_label_set_text(step_label, buf);
 }

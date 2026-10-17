@@ -76,17 +76,30 @@ oc_run_staged() {
 # oc_swap_on / oc_swap_off
 # A temporary 512 MB swap file on /usr/data while pip compiles, so the
 # printer's 473 MB of RAM does not run out. Best effort: skipped if swap
-# is already on or mkswap/swapon are missing.
+# is already on or mkswap/swapon are missing, and the kernel's support is
+# tried with a 1 MB file before 512 MB are written. A failure is remembered
+# in OC_SWAP_BROKEN so later installs don't try again.
 OC_SWAPFILE=/usr/data/opencreator/swapfile
+OC_SWAP_BROKEN=/usr/data/opencreator/.swap-unsupported
 oc_swap_on() {
     [ -z "${OC_DEMO_ROOT:-}" ] || return 0
     command -v mkswap >/dev/null 2>&1 && command -v swapon >/dev/null 2>&1 || return 0
+    [ ! -f "$OC_SWAP_BROKEN" ] || return 0
+    [ -r /proc/swaps ] || { : > "$OC_SWAP_BROKEN"; return 0; }
     [ "$(awk 'NR > 1' /proc/swaps | wc -l)" -eq 0 ] || return 0
-    echo "STAGE Adding temporary swap for compiling"
     mkdir -p "$(dirname "$OC_SWAPFILE")"
-    dd if=/dev/zero of="$OC_SWAPFILE" bs=1M count=512 2>/dev/null &&
+    if ! { dd if=/dev/zero of="$OC_SWAPFILE" bs=1M count=1 2>/dev/null &&
         chmod 600 "$OC_SWAPFILE" && mkswap "$OC_SWAPFILE" >/dev/null 2>&1 &&
-        swapon "$OC_SWAPFILE" 2>/dev/null ||
+        swapon "$OC_SWAPFILE" 2>/dev/null; }; then
+        rm -f "$OC_SWAPFILE"
+        : > "$OC_SWAP_BROKEN"
+        echo "STAGE Swap is not supported on this printer; continuing without it"
+        return 0
+    fi
+    swapoff "$OC_SWAPFILE" 2>/dev/null || true
+    echo "STAGE Adding temporary swap for compiling"
+    dd if=/dev/zero of="$OC_SWAPFILE" bs=1M count=512 2>/dev/null &&
+        mkswap "$OC_SWAPFILE" >/dev/null 2>&1 && swapon "$OC_SWAPFILE" 2>/dev/null ||
         { echo "STAGE Temporary swap unavailable; continuing without it"; rm -f "$OC_SWAPFILE"; }
 }
 oc_swap_off() {
