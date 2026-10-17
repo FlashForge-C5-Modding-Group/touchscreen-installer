@@ -135,6 +135,8 @@ wifi_up() {
 wifi_scan() {
     wifi_up
     stage "Scanning for Wi-Fi networks"
+    current=$(wpa status 2>/dev/null | sed -n 's/^ssid=//p' | head -n 1)
+    [ -z "$current" ] || printf 'WIFINOW %s\n' "$current"
     wpa scan >/dev/null
     sleep 4
     # Hidden networks show up as an empty SSID or as \x00 escapes.
@@ -157,15 +159,18 @@ wifi_connect() {
     stage "Connecting to $ssid"
     id=$(wpa add_network | tail -n 1) || true
     case "$id" in *[!0-9]*|'') die "Cannot add the Wi-Fi network" ;; esac
-    # SSID as hex, so quotes and spaces in it need no escaping.
-    hex=$(printf '%s' "$ssid" | od -An -tx1 | tr -d ' \n')
-    ok=$(wpa set_network "$id" ssid "$hex") || true
+    # Quoted: wpa_supplicant reads up to the last quote, so spaces, quotes
+    # and UTF-8 in the name are fine (busybox od can't make hex here).
+    ok=$(wpa set_network "$id" ssid "\"$ssid\"") || true
     if [ -n "$psk" ]; then
         ok="$ok $(wpa set_network "$id" psk "\"$psk\"" || true)"
     else
         ok="$ok $(wpa set_network "$id" key_mgmt NONE || true)"
     fi
-    case "$ok" in *FAIL*) wpa reconfigure >/dev/null; die "Cannot set up $ssid" ;; esac
+    if [ "$(echo $ok)" != "OK OK" ]; then
+        wpa remove_network "$id" >/dev/null 2>&1
+        die "Cannot set up $ssid (wpa_cli: $(echo $ok))"
+    fi
     wpa select_network "$id" >/dev/null
     i=0
     until wpa status | grep -q '^wpa_state=COMPLETED' || [ $i -ge 30 ]; do

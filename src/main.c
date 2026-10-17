@@ -61,8 +61,8 @@ struct wifi_net { char ssid[64]; int signal; bool secured; };
 static struct wifi_net wifi_nets[15];
 static int wifi_count;
 static bool wifi_scanned;
-static char wifi_ssid[64], wifi_error[200];
-static lv_obj_t *wifi_list, *wifi_ta, *wifi_kb, *wifi_back;
+static char wifi_ssid[64], wifi_error[200], wifi_current[64];
+static lv_obj_t *wifi_list, *wifi_ta, *wifi_kb, *wifi_back, *wifi_button;
 static char machine[32] = "unknown";
 static bool model_known;
 static char backup_found[512];
@@ -313,6 +313,7 @@ static void start_action(const char *action)
     if (strcmp(action, "wifi-scan") == 0) {
         wifi_count = 0;
         wifi_scanned = false;
+        wifi_current[0] = '\0';
         set_status("Scanning for Wi-Fi networks...");
     } else if (strcmp(action, "wifi-connect") == 0) {
         wifi_error[0] = '\0';
@@ -441,6 +442,11 @@ static void action_button(lv_event_t *event)
     else if (strcmp(action, "rollback") == 0) { demo_root = NULL; start_action("rollback"); }
     else if (strcmp(action, "wifi-rescan") == 0) { if (child_pid < 0) start_action("wifi-scan"); show_page(PAGE_OFFLINE); }
     else if (strcmp(action, "wifi-back") == 0) show_page(PAGE_OFFLINE);
+    else if (strcmp(action, "wifi-open") == 0) {
+        if (child_pid > 0) return;
+        wifi_scanned = false;
+        show_page(PAGE_OFFLINE);
+    }
     else if (strcmp(action, "start") == 0)
         show_page(!online ? PAGE_OFFLINE
                   : installed_same && model_known ? PAGE_INSTALLED
@@ -547,7 +553,12 @@ static void show_page(enum page next)
     else lv_obj_clear_flag(status_label, LV_OBJ_FLAG_HIDDEN);
     if (start_page) lv_obj_clear_flag(quit_button, LV_OBJ_FLAG_HIDDEN);
     else lv_obj_add_flag(quit_button, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_align(step_label, LV_ALIGN_TOP_RIGHT, start_page ? -226 : -124, 18);
+    /* Wi-Fi: on the start pages, to switch networks even while online. */
+    bool wifi_shown = start_page && next != PAGE_OFFLINE && next != PAGE_WIFI_PASS;
+    if (wifi_shown) lv_obj_clear_flag(wifi_button, LV_OBJ_FLAG_HIDDEN);
+    else lv_obj_add_flag(wifi_button, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_align(step_label, LV_ALIGN_TOP_RIGHT,
+                 wifi_shown ? -328 : start_page ? -226 : -124, 18);
     bool restoring = strcmp(current_action, "restore") == 0;
     bool reconfiguring = strcmp(current_action, "reconfigure") == 0;
     bool rolling_back = strcmp(current_action, "rollback") == 0;
@@ -572,10 +583,17 @@ static void show_page(enum page next)
         add_button("Check again", "restart");
         break;
     case PAGE_OFFLINE:
-        set_title(next, "No internet connection");
-        lv_label_set_text(body_label,
-            "OpenCreator downloads everything it installs, so the printer needs internet. "
-            "Pick your Wi-Fi network, or Quit to start the printer normally.");
+        /* Also the Wi-Fi page while online (header Wi-Fi button). */
+        if (online) {
+            set_title(next, "Wi-Fi");
+            lv_label_set_text(body_label,
+                "The printer is online. Pick another network to switch to it.");
+        } else {
+            set_title(next, "No internet connection");
+            lv_label_set_text(body_label,
+                "OpenCreator downloads everything it installs, so the printer needs internet. "
+                "Pick your Wi-Fi network, or Quit to start the printer normally.");
+        }
         lv_obj_clean(wifi_list);
         lv_obj_clear_flag(wifi_list, LV_OBJ_FLAG_HIDDEN);
         if (!wifi_scanned && child_pid < 0) start_action("wifi-scan");
@@ -590,13 +608,15 @@ static void show_page(enum page next)
                 const struct wifi_net *net = &wifi_nets[i];
                 const char *strength = net->signal >= -60 ? "strong"
                                      : net->signal >= -72 ? "good" : "weak";
-                snprintf(rows[i], sizeof(rows[i]), "%.63s   (%s%s)", net->ssid, strength,
+                snprintf(rows[i], sizeof(rows[i]), "%.63s   (%s%s%s)", net->ssid,
+                         strcmp(net->ssid, wifi_current) == 0 ? "connected, " : "", strength,
                          net->secured ? "" : ", open");
                 lv_obj_t *row = lv_list_add_btn(wifi_list, LV_SYMBOL_WIFI, rows[i]);
                 lv_obj_add_event_cb(row, wifi_pick, LV_EVENT_CLICKED, (void *)net);
             }
             set_status("Tap a network to join it");
         }
+        if (online) add_button("Back", "start");
         add_button(LV_SYMBOL_REFRESH "  Scan again", "wifi-rescan");
         break;
     case PAGE_WIFI_PASS:
@@ -905,6 +925,8 @@ static void process_line(char *line)
     }
     if (strcmp(line, "NETWORK DOWN") == 0) online = false;
     else if (strcmp(line, "NETWORK OK") == 0) online = true;
+    else if (strncmp(line, "WIFINOW ", 8) == 0)
+        snprintf(wifi_current, sizeof(wifi_current), "%.63s", line + 8);
     else if (strncmp(line, "WIFI ", 5) == 0 && wifi_count < (int)(sizeof(wifi_nets) / sizeof(wifi_nets[0]))) {
         struct wifi_net *net = &wifi_nets[wifi_count];
         int secured = 0, used = 0;
@@ -1264,6 +1286,9 @@ int main(int argc, char **argv)
     quit_button = make_button(screen, LV_SYMBOL_CLOSE "  Quit", "quit", false, 90, 36);
     lv_obj_align(quit_button, LV_ALIGN_TOP_RIGHT, -122, 8);
     lv_obj_add_flag(quit_button, LV_OBJ_FLAG_HIDDEN);
+    wifi_button = make_button(screen, LV_SYMBOL_WIFI "  Wi-Fi", "wifi-open", false, 90, 36);
+    lv_obj_align(wifi_button, LV_ALIGN_TOP_RIGHT, -224, 8);
+    lv_obj_add_flag(wifi_button, LV_OBJ_FLAG_HIDDEN);
 
     step_label = lv_label_create(screen);
     lv_obj_set_style_text_color(step_label, lv_color_hex(OC_COLOR_MUTED), 0);
