@@ -16,7 +16,7 @@
 
 enum page { PAGE_CHECK, PAGE_MODE, PAGE_WEB, PAGE_TOUCHSCREEN, PAGE_READY,
             PAGE_RUNNING, PAGE_DONE, PAGE_ERROR, PAGE_RESTORE, PAGE_KERNEL,
-            PAGE_INSTALLED, PAGE_ROLLBACK, PAGE_UPDATE };
+            PAGE_INSTALLED, PAGE_ROLLBACK, PAGE_UPDATE, PAGE_OFFLINE, PAGE_WIFI_PASS };
 static enum page page_now;
 static const char *payload_path, *backup_path, *script_path;
 static const char *mode = "soc", *web = "fluidd";
@@ -49,6 +49,20 @@ static uint64_t running_since, splash_until;
 static char step_name[48];
 static int step_done, step_total;
 static unsigned run_secs;
+/* Quit: leave the installer and let the normal boot start what is installed.
+ * splash_quit is the same for the Wi-Fi splash (--wait). */
+static lv_obj_t *quit_button;
+static bool splash_quit;
+#define OC_QUIT_FLAG "/tmp/opencreator-quit"
+/* No internet (NETWORK DOWN from the check): installing is blocked and the
+ * start page lists nearby Wi-Fi networks (wifi-scan) to join (wifi-connect). */
+static bool online = true;
+struct wifi_net { char ssid[64]; int signal; bool secured; };
+static struct wifi_net wifi_nets[15];
+static int wifi_count;
+static bool wifi_scanned;
+static char wifi_ssid[64], wifi_error[200];
+static lv_obj_t *wifi_list, *wifi_ta, *wifi_kb, *wifi_back;
 static char machine[32] = "unknown";
 static bool model_known;
 static char backup_found[512];
@@ -114,6 +128,8 @@ static const char *page_icon(enum page p)
     case PAGE_RESTORE:
     case PAGE_ROLLBACK: return LV_SYMBOL_LOOP;
     case PAGE_UPDATE: return LV_SYMBOL_UPLOAD;
+    case PAGE_OFFLINE:
+    case PAGE_WIFI_PASS: return LV_SYMBOL_WIFI;
     default:         return LV_SYMBOL_HOME;
     }
 }
@@ -294,7 +310,14 @@ static void start_action(const char *action)
     fcntl(child_fd, F_SETFL, fcntl(child_fd, F_GETFL, 0) | O_NONBLOCK);
     snprintf(current_action, sizeof(current_action), "%s", action);
     line_len = 0;
-    if (strcmp(action, "check") == 0) {
+    if (strcmp(action, "wifi-scan") == 0) {
+        wifi_count = 0;
+        wifi_scanned = false;
+        set_status("Scanning for Wi-Fi networks...");
+    } else if (strcmp(action, "wifi-connect") == 0) {
+        wifi_error[0] = '\0';
+    } else if (strcmp(action, "check") == 0) {
+        online = true;
         warn_text[0] = '\0';
         splash_until = now_ms() + 1500;
         backup_found[0] = '\0';
@@ -324,9 +347,62 @@ static void request_reboot(void)
 #endif
 }
 
+/* Ends the installer; runFirmwareExe.sh then lets the normal boot carry on
+ * into whatever is installed. Not while an install is running. */
+static void quit_installer(void)
+{
+    if (child_pid > 0) {
+        if (strcmp(current_action, "check") != 0) return;
+        kill(child_pid, SIGTERM);
+        waitpid(child_pid, NULL, 0);
+    }
+    set_status("Starting the installed firmware...");
+    lv_refr_now(NULL);
+    sync_log_files();
+    exit(0);
+}
+
+/* Joins wifi_ssid (psk empty for an open network); the password reaches the
+ * backend through the environment only and is never logged. */
+static void connect_wifi(const char *psk)
+{
+    if (child_pid > 0) return;
+    setenv("OC_WIFI_SSID", wifi_ssid, 1);
+    setenv("OC_WIFI_PSK", psk, 1);
+    static char body[120];
+    snprintf(body, sizeof(body), "Connecting to %s...", wifi_ssid);
+    lv_label_set_text(body_label, body);
+    start_action("wifi-connect");
+    unsetenv("OC_WIFI_PSK");
+    unsetenv("OC_WIFI_SSID");
+}
+
+static void wifi_pick(lv_event_t *event)
+{
+    const struct wifi_net *net = lv_event_get_user_data(event);
+    if (child_pid > 0) return;
+    snprintf(wifi_ssid, sizeof(wifi_ssid), "%s", net->ssid);
+    wifi_error[0] = '\0';
+    if (!net->secured) {
+        connect_wifi("");
+        return;
+    }
+    lv_textarea_set_text(wifi_ta, "");
+    show_page(PAGE_WIFI_PASS);
+}
+
+static void wifi_keyboard(lv_event_t *event)
+{
+    lv_event_code_t code = lv_event_get_code(event);
+    if (code == LV_EVENT_READY) connect_wifi(lv_textarea_get_text(wifi_ta));
+    else if (code == LV_EVENT_CANCEL) show_page(PAGE_OFFLINE);
+}
+
 static void action_button(lv_event_t *event)
 {
     const char *action = lv_event_get_user_data(event);
+    if (strcmp(action, "quit") == 0) { quit_installer(); return; }
+    if (strcmp(action, "splash-quit") == 0) { splash_quit = true; return; }
     if (strcmp(action, "soc") == 0) { mode = "soc"; show_page(PAGE_WEB); }
     else if (strcmp(action, "tunnel") == 0) {
         mode = "tunnel"; web = "none"; show_page(PAGE_TOUCHSCREEN);
@@ -363,8 +439,11 @@ static void action_button(lv_event_t *event)
     else if (strcmp(action, "restore-confirm") == 0) show_page(PAGE_RESTORE);
     else if (strcmp(action, "rollback-confirm") == 0) show_page(PAGE_ROLLBACK);
     else if (strcmp(action, "rollback") == 0) { demo_root = NULL; start_action("rollback"); }
+    else if (strcmp(action, "wifi-rescan") == 0) { if (child_pid < 0) start_action("wifi-scan"); show_page(PAGE_OFFLINE); }
+    else if (strcmp(action, "wifi-back") == 0) show_page(PAGE_OFFLINE);
     else if (strcmp(action, "start") == 0)
-        show_page(installed_same && model_known ? PAGE_INSTALLED
+        show_page(!online ? PAGE_OFFLINE
+                  : installed_same && model_known ? PAGE_INSTALLED
                   : update_available && model_known ? PAGE_UPDATE : PAGE_MODE);
     else if (strcmp(action, "restore") == 0) { demo_root = NULL; start_action("restore"); }
     else if (strcmp(action, "restart") == 0) {
@@ -456,6 +535,19 @@ static void show_page(enum page next)
                  next == PAGE_DONE ? "Finished in" : "Stopped after", took);
     }
     lv_label_set_text(step_label, step_buf);
+    /* Quit only on the start pages, never during or after an install. */
+    bool start_page = next == PAGE_MODE || next == PAGE_INSTALLED || next == PAGE_UPDATE ||
+                      next == PAGE_KERNEL || next == PAGE_OFFLINE || next == PAGE_WIFI_PASS;
+    lv_obj_add_flag(wifi_list, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(wifi_ta, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(wifi_kb, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(wifi_back, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_set_style_text_color(body_label, lv_color_hex(OC_COLOR_TEXT), 0);
+    if (next == PAGE_WIFI_PASS) lv_obj_add_flag(status_label, LV_OBJ_FLAG_HIDDEN);
+    else lv_obj_clear_flag(status_label, LV_OBJ_FLAG_HIDDEN);
+    if (start_page) lv_obj_clear_flag(quit_button, LV_OBJ_FLAG_HIDDEN);
+    else lv_obj_add_flag(quit_button, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_align(step_label, LV_ALIGN_TOP_RIGHT, start_page ? -226 : -124, 18);
     bool restoring = strcmp(current_action, "restore") == 0;
     bool reconfiguring = strcmp(current_action, "reconfigure") == 0;
     bool rolling_back = strcmp(current_action, "rollback") == 0;
@@ -478,6 +570,49 @@ static void show_page(enum page next)
             lv_label_set_text(body_label, buf);
         }
         add_button("Check again", "restart");
+        break;
+    case PAGE_OFFLINE:
+        set_title(next, "No internet connection");
+        lv_label_set_text(body_label,
+            "OpenCreator downloads everything it installs, so the printer needs internet. "
+            "Pick your Wi-Fi network, or Quit to start the printer normally.");
+        lv_obj_clean(wifi_list);
+        lv_obj_clear_flag(wifi_list, LV_OBJ_FLAG_HIDDEN);
+        if (!wifi_scanned && child_pid < 0) start_action("wifi-scan");
+        if (!wifi_scanned) {
+            lv_list_add_text(wifi_list, "Scanning for networks...");
+        } else if (wifi_count == 0) {
+            lv_list_add_text(wifi_list, "No networks found. Move closer to the router, then scan again.");
+            set_status("No Wi-Fi networks found");
+        } else {
+            for (int i = 0; i < wifi_count; i++) {
+                static char rows[15][96];
+                const struct wifi_net *net = &wifi_nets[i];
+                const char *strength = net->signal >= -60 ? "strong"
+                                     : net->signal >= -72 ? "good" : "weak";
+                snprintf(rows[i], sizeof(rows[i]), "%.63s   (%s%s)", net->ssid, strength,
+                         net->secured ? "" : ", open");
+                lv_obj_t *row = lv_list_add_btn(wifi_list, LV_SYMBOL_WIFI, rows[i]);
+                lv_obj_add_event_cb(row, wifi_pick, LV_EVENT_CLICKED, (void *)net);
+            }
+            set_status("Tap a network to join it");
+        }
+        add_button(LV_SYMBOL_REFRESH "  Scan again", "wifi-rescan");
+        break;
+    case PAGE_WIFI_PASS:
+        {
+            static char title[96], body[240];
+            snprintf(title, sizeof(title), "Wi-Fi password for %s", wifi_ssid);
+            set_title(next, title);
+            snprintf(body, sizeof(body), "%s", wifi_error[0] ? wifi_error
+                     : "Type the password, then press " LV_SYMBOL_OK " on the keyboard.");
+            lv_label_set_text(body_label, body);
+            lv_obj_set_style_text_color(body_label, lv_color_hex(wifi_error[0]
+                ? OC_COLOR_DANGER : OC_COLOR_TEXT), 0);
+            lv_obj_clear_flag(wifi_ta, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_clear_flag(wifi_kb, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_clear_flag(wifi_back, LV_OBJ_FLAG_HIDDEN);
+        }
         break;
     case PAGE_UPDATE:
         {
@@ -768,6 +903,20 @@ static void process_line(char *line)
         sscanf(line + 4, "%47s %47s", mcu_drive, mcu_boards);
         update_version();
     }
+    if (strcmp(line, "NETWORK DOWN") == 0) online = false;
+    else if (strcmp(line, "NETWORK OK") == 0) online = true;
+    else if (strncmp(line, "WIFI ", 5) == 0 && wifi_count < (int)(sizeof(wifi_nets) / sizeof(wifi_nets[0]))) {
+        struct wifi_net *net = &wifi_nets[wifi_count];
+        int secured = 0, used = 0;
+        if (sscanf(line + 5, "%d %d %n", &net->signal, &secured, &used) >= 2 && used > 0 &&
+            line[5 + used]) {
+            snprintf(net->ssid, sizeof(net->ssid), "%s", line + 5 + used);
+            net->secured = secured != 0;
+            wifi_count++;
+        }
+    }
+    if (strncmp(line, "ERROR ", 6) == 0 && strcmp(current_action, "wifi-connect") == 0)
+        snprintf(wifi_error, sizeof(wifi_error), "%.190s", line + 6);
     if (strncmp(line, "STAGE Running ", 14) == 0) set_step_name(line + 14);
     if (strncmp(line, "STAGE ", 6) == 0) set_status(line + 6);
     else if (strncmp(line, "ERROR ", 6) == 0) set_status_error(line + 6);
@@ -843,10 +992,24 @@ static void poll_child(void)
     child_pid = -1;
     run_secs = (unsigned)((now_ms() - running_since) / 1000u);
     sync_log_files();
-    if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
+    bool ok = WIFEXITED(status) && WEXITSTATUS(status) == 0;
+    if (strcmp(current_action, "wifi-scan") == 0) {
+        wifi_scanned = true;
+        if (page_now == PAGE_OFFLINE) show_page(PAGE_OFFLINE);
+    } else if (strcmp(current_action, "wifi-connect") == 0) {
+        if (ok) {
+            /* Online now: run the check again, which carries on as usual. */
+            show_page(PAGE_CHECK);
+            start_action("check");
+        } else {
+            if (!wifi_error[0]) snprintf(wifi_error, sizeof(wifi_error), "Could not connect to %s", wifi_ssid);
+            show_page(PAGE_WIFI_PASS);
+        }
+    } else if (!ok) {
         show_page(PAGE_ERROR);
     } else if (strcmp(current_action, "check") == 0) {
         show_page(!kernel_ok ? PAGE_KERNEL
+                  : !online ? PAGE_OFFLINE
                   : installed_same && model_known ? PAGE_INSTALLED
                   : update_available && model_known ? PAGE_UPDATE : PAGE_MODE);
     } else {
@@ -979,15 +1142,28 @@ static void register_display(uint32_t *width, uint32_t *height)
 #ifndef OC_DEMO
 /* Draws the logo (and an optional status line) to the framebuffer and
  * exits; runFirmwareExe.sh shows it while the printer gets ready. */
-static int show_splash(const char *message)
+/* --splash MESSAGE draws and exits. --wait MESSAGE stays up with a Quit
+ * button until it is killed; Quit creates OC_QUIT_FLAG and exits, and
+ * runFirmwareExe.sh then skips the installer (for example when Wi-Fi never
+ * connects). Without a touchscreen it just shows the message. */
+static int show_splash(const char *message, bool wait)
 {
     lv_init();
     uint32_t width = 800, height = 480;
-    if (platform_init("/dev/fb0", NULL, &width, &height) != 0) {
+    const char *touch = wait ? touch_device() : NULL;
+    if (touch && access(touch, R_OK) != 0) touch = NULL;
+    if (platform_init("/dev/fb0", touch, &width, &height) != 0) {
         fprintf(stderr, "framebuffer unavailable\n");
         return 1;
     }
     register_display(&width, &height);
+    if (touch) {
+        static lv_indev_drv_t input;
+        lv_indev_drv_init(&input);
+        input.type = LV_INDEV_TYPE_POINTER;
+        input.read_cb = platform_touch;
+        lv_indev_drv_register(&input);
+    }
     lv_obj_t *screen = lv_scr_act();
     lv_obj_set_style_bg_color(screen, lv_color_hex(OC_COLOR_BG), 0);
     lv_obj_t *logo = lv_img_create(screen);
@@ -1001,6 +1177,32 @@ static int show_splash(const char *message)
         lv_obj_set_style_text_color(label, lv_color_hex(OC_COLOR_MUTED), 0);
         lv_obj_align_to(label, logo, LV_ALIGN_OUT_BOTTOM_MID, 0, 24);
     }
+    if (!wait) {
+        lv_refr_now(NULL);
+        return 0;
+    }
+    lv_obj_t *hint = NULL;
+    if (touch) {
+        lv_obj_t *quit = make_button(screen, LV_SYMBOL_CLOSE "  Quit", "splash-quit",
+                                     false, 160, 50);
+        lv_obj_align(quit, LV_ALIGN_BOTTOM_MID, 0, -56);
+        hint = lv_label_create(screen);
+        lv_label_set_text(hint, "Skip the installer and start the printer normally");
+        lv_obj_set_style_text_color(hint, lv_color_hex(OC_COLOR_MUTED), 0);
+        lv_obj_align(hint, LV_ALIGN_BOTTOM_MID, 0, -24);
+    }
+    uint64_t last = now_ms();
+    while (!splash_quit) {
+        uint64_t now = now_ms();
+        lv_tick_inc((uint32_t)(now - last));
+        last = now;
+        lv_timer_handler();
+        struct timespec nap = { .tv_sec = 0, .tv_nsec = 20000000 };
+        nanosleep(&nap, NULL);
+    }
+    FILE *flag = fopen(OC_QUIT_FLAG, "w");
+    if (flag) fclose(flag);
+    lv_label_set_text(hint, "Starting the installed firmware...");
     lv_refr_now(NULL);
     return 0;
 }
@@ -1010,7 +1212,9 @@ int main(int argc, char **argv)
 {
 #ifndef OC_DEMO
     if (argc >= 2 && strcmp(argv[1], "--splash") == 0)
-        return show_splash(argc > 2 ? argv[2] : NULL);
+        return show_splash(argc > 2 ? argv[2] : NULL, false);
+    if (argc >= 2 && strcmp(argv[1], "--wait") == 0)
+        return show_splash(argc > 2 ? argv[2] : NULL, true);
 #endif
 #ifdef OC_DEMO
     (void)argc;
@@ -1057,10 +1261,13 @@ int main(int argc, char **argv)
     lv_obj_t *log_button = make_button(screen, LV_SYMBOL_LIST "  Log", "log-open",
                                        false, 90, 36);
     lv_obj_align(log_button, LV_ALIGN_TOP_RIGHT, -20, 8);
+    quit_button = make_button(screen, LV_SYMBOL_CLOSE "  Quit", "quit", false, 90, 36);
+    lv_obj_align(quit_button, LV_ALIGN_TOP_RIGHT, -122, 8);
+    lv_obj_add_flag(quit_button, LV_OBJ_FLAG_HIDDEN);
 
     step_label = lv_label_create(screen);
     lv_obj_set_style_text_color(step_label, lv_color_hex(OC_COLOR_MUTED), 0);
-    lv_obj_align(step_label, LV_ALIGN_TOP_RIGHT, -124, 18);
+    lv_obj_align(step_label, LV_ALIGN_TOP_RIGHT, -226, 18);
 
     title_label = lv_label_create(screen);
     lv_obj_set_width(title_label, width - 60);
@@ -1135,6 +1342,35 @@ int main(int argc, char **argv)
     lv_obj_set_style_text_color(version_label, lv_color_hex(OC_COLOR_MUTED), 0);
     lv_obj_align(version_label, LV_ALIGN_BOTTOM_MID, 0, -4);
     update_version();
+
+    /* No-internet page: nearby networks, then a password with a keyboard. */
+    wifi_list = lv_list_create(screen);
+    lv_obj_set_size(wifi_list, width - 60, 190);
+    lv_obj_align(wifi_list, LV_ALIGN_TOP_LEFT, 30, 150);
+    lv_obj_set_style_bg_color(wifi_list, lv_color_hex(OC_COLOR_CARD), 0);
+    lv_obj_set_style_border_width(wifi_list, 0, 0);
+    lv_obj_set_style_radius(wifi_list, 10, 0);
+    lv_obj_add_flag(wifi_list, LV_OBJ_FLAG_HIDDEN);
+
+    wifi_ta = lv_textarea_create(screen);
+    lv_textarea_set_one_line(wifi_ta, true);
+    lv_textarea_set_password_mode(wifi_ta, true);
+    lv_textarea_set_max_length(wifi_ta, 63);
+    lv_textarea_set_placeholder_text(wifi_ta, "Password");
+    lv_obj_set_size(wifi_ta, width - 270, 50);
+    lv_obj_align(wifi_ta, LV_ALIGN_TOP_LEFT, 30, 140);
+    lv_obj_add_flag(wifi_ta, LV_OBJ_FLAG_HIDDEN);
+
+    wifi_back = make_button(screen, LV_SYMBOL_LEFT "  Networks", "wifi-back", false, 190, 50);
+    lv_obj_align(wifi_back, LV_ALIGN_TOP_RIGHT, -30, 140);
+    lv_obj_add_flag(wifi_back, LV_OBJ_FLAG_HIDDEN);
+
+    wifi_kb = lv_keyboard_create(screen);
+    lv_obj_set_size(wifi_kb, width, height - 210);
+    lv_obj_align(wifi_kb, LV_ALIGN_BOTTOM_MID, 0, 0);
+    lv_keyboard_set_textarea(wifi_kb, wifi_ta);
+    lv_obj_add_event_cb(wifi_kb, wifi_keyboard, LV_EVENT_ALL, NULL);
+    lv_obj_add_flag(wifi_kb, LV_OBJ_FLAG_HIDDEN);
 
     build_log_panel(screen, width, height);
 

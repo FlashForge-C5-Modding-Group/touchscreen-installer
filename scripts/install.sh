@@ -109,8 +109,91 @@ preflight() {
         set -- "$PAYLOAD/installers/$m"/*.sh
         [ -f "$1" ] || warn "No $m installer scripts in payload"
     done
-    if [ -z "$DEMO_ROOT" ] && ! ping -c1 -W3 github.com >/dev/null 2>&1; then
-        warn "No internet: the install downloads Entware and the rest, connect Wi-Fi first"
+}
+# Everything an install needs is downloaded; demo installs count as online.
+online() {
+    [ -n "$DEMO_ROOT" ] && return 0
+    ping -c1 -W3 github.com >/dev/null 2>&1 || ping -c1 -W3 1.1.1.1 >/dev/null 2>&1
+}
+require_online() {
+    online || die "No internet connection. Connect the printer to Wi-Fi and try again; nothing was changed"
+}
+
+# Wi-Fi through FlashForge's own wpa_supplicant (control socket, update_config).
+WPA_CONF=/usr/prog/wifi/wpa_supplicant.conf
+wpa() { wpa_cli -i wlan0 "$@"; }
+wifi_up() {
+    [ -e /sys/class/net/wlan0 ] || die "No Wi-Fi adapter found"
+    ifconfig wlan0 up 2>/dev/null
+    if ! pidof wpa_supplicant >/dev/null; then
+        wpa_supplicant -Dnl80211 -iwlan0 -c"$WPA_CONF" -B || die "Cannot start Wi-Fi"
+        sleep 2
+    fi
+    pidof udhcpc >/dev/null || udhcpc -i wlan0 -b >/dev/null 2>&1
+}
+# WIFI <signal dBm> <secured 0|1> <ssid>, strongest first, one line per SSID.
+wifi_scan() {
+    wifi_up
+    stage "Scanning for Wi-Fi networks"
+    wpa scan >/dev/null
+    sleep 4
+    # Hidden networks show up as an empty SSID or as \x00 escapes.
+    wpa scan_results | awk -F'\t' 'NR > 1 && $5 ~ /[[:graph:]]/ && index($5, "\\x00") == 0 {
+            secured = ($4 ~ /WPA|WEP|RSN/) ? 1 : 0
+            if (!($5 in best) || $3 > best[$5]) { best[$5] = $3; sec[$5] = secured }
+        }
+        END { for (s in best) printf "WIFI %d %d %s\n", best[s], sec[s], s }' |
+        sort -k2,2nr | head -n 15
+}
+# OC_WIFI_SSID / OC_WIFI_PSK (empty for an open network). Saved to the config
+# only once it connects; a failure reloads the saved config.
+wifi_connect() {
+    ssid=${OC_WIFI_SSID:?}
+    psk=${OC_WIFI_PSK:-}
+    if [ -n "$psk" ] && { [ ${#psk} -lt 8 ] || [ ${#psk} -gt 63 ]; }; then
+        die "Wi-Fi passwords are 8 to 63 characters"
+    fi
+    wifi_up
+    stage "Connecting to $ssid"
+    id=$(wpa add_network | tail -n 1) || true
+    case "$id" in *[!0-9]*|'') die "Cannot add the Wi-Fi network" ;; esac
+    # SSID as hex, so quotes and spaces in it need no escaping.
+    hex=$(printf '%s' "$ssid" | od -An -tx1 | tr -d ' \n')
+    ok=$(wpa set_network "$id" ssid "$hex") || true
+    if [ -n "$psk" ]; then
+        ok="$ok $(wpa set_network "$id" psk "\"$psk\"" || true)"
+    else
+        ok="$ok $(wpa set_network "$id" key_mgmt NONE || true)"
+    fi
+    case "$ok" in *FAIL*) wpa reconfigure >/dev/null; die "Cannot set up $ssid" ;; esac
+    wpa select_network "$id" >/dev/null
+    i=0
+    until wpa status | grep -q '^wpa_state=COMPLETED' || [ $i -ge 30 ]; do
+        sleep 1; i=$((i + 1))
+    done
+    if ! wpa status | grep -q '^wpa_state=COMPLETED'; then
+        wpa reconfigure >/dev/null
+        die "Could not join $ssid. Check the password and try again"
+    fi
+    stage "Joined $ssid; getting an address"
+    udhcpc -i wlan0 -n -q -t 10 >/dev/null 2>&1 || true
+    i=0
+    until online || [ $i -ge 15 ]; do sleep 2; i=$((i + 1)); done
+    online || { wpa reconfigure >/dev/null; die "Joined $ssid but there is no internet through it"; }
+    wpa save_config >/dev/null || warn "Connected, but the Wi-Fi settings could not be saved"
+    set_clock
+    stage "Connected to $ssid"
+}
+# The clock is wrong after a boot without network, and HTTPS downloads fail
+# on a wrong date: NTP first, then the time protocol (rdate).
+set_clock() {
+    stage "Setting the clock"
+    if busybox ntpd -n -q -p pool.ntp.org >/dev/null 2>&1 ||
+        busybox ntpd -n -q -p time.google.com >/dev/null 2>&1 ||
+        rdate -s time.nist.gov >/dev/null 2>&1 || rdate -s time-a-g.nist.gov >/dev/null 2>&1; then
+        stage "Clock set: $(date -u '+%Y-%m-%d %H:%M UTC')"
+    else
+        warn "Could not reach a time server; the clock may be wrong"
     fi
 }
 # FlashForge firmware version: app_startup.sh runs the highest numbered
@@ -220,6 +303,7 @@ check() {
         stage "No prior OpenCreator install record"
     fi
     preflight
+    if online; then printf 'NETWORK OK\n'; else printf 'NETWORK DOWN\n'; fi
     warned=
     for folder in $(foreign_folders); do
         name=$(foreign_name "$folder")
@@ -539,8 +623,10 @@ rollback_stock() {
 case "$ACTION" in
     check) check ;;
     rollback) rollback_stock ;;
-    install) install_payload ;;
-    reconfigure) reconfigure ;;
+    install) require_online; install_payload ;;
+    reconfigure) require_online; reconfigure ;;
+    wifi-scan) wifi_scan ;;
+    wifi-connect) wifi_connect ;;
     restore) restore_backup ;;
     *) die "unknown action" ;;
 esac
