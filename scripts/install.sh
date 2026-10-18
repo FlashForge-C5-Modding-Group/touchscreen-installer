@@ -32,7 +32,7 @@ if [ -z "$DEMO_ROOT" ]; then
 fi
 STATE_DIR=${OC_STATE_DIR:-"$DEMO_ROOT/usr/data/opencreator"}
 INSTALL_STATE=$STATE_DIR/install.json
-INSTALLER_VERSION=0.4.2
+INSTALLER_VERSION=0.4.4
 MIN_FREE_KB=${OC_MIN_FREE_KB:-262144}
 BACKUP_FOLDERS="usr/prog/PROGRAM/software/firmwareExe usr/prog/moonraker usr/data/opencreator
 usr/data/mainsail usr/data/fluidd usr/data/nginx usr/prog/c5-tunnel-socat
@@ -548,6 +548,7 @@ reconfigure() {
             git -C "$MR/moonraker" remote get-url origin 2>/dev/null | grep -q Arksine &&
                 [ -x "$MR/moonraker-env/bin/python" ] ||
                 steps="$steps installers/soc/15-install-moonraker.sh"
+            steps="$steps installers/soc/17-install-timelapse.sh"
             steps="$steps installers/soc/20-install-web.sh"
         fi
     elif [ "$MODE" = soc ] && [ "$WEB" != "$old_web" ]; then

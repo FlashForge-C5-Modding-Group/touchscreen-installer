@@ -167,7 +167,8 @@ static void set_step_name(const char *script)
     static const char *const names[][2] = {
         {"install-entware", "Entware"}, {"install-loopscript", "LoopScript"},
         {"install-python", "Python"}, {"install-stack", "Kalico"},
-        {"install-moonraker", "Moonraker"}, {"install-web", "Web UI"},
+        {"install-moonraker", "Moonraker"}, {"install-timelapse", "Timelapse"},
+        {"install-web", "Web UI"},
         {"install-grumpyscreen", "Touchscreen"}, {"install-tunnel", "Tunnel bridge"},
         {"enable-root", "Root login"}, {"activate-loopscript", "Activating"},
         {"flash-mcu-firmware", "MCU firmware"},
