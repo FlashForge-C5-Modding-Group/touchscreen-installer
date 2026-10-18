@@ -221,6 +221,7 @@ payload/
   common/flash-mcu-firmware.sh     # MCU firmware (both modes)
   common/enable-root.sh            # root login opencreator / FlashForge2026 (both modes)
   common/enable-sftp.sh            # SFTP on the SSH login (both modes)
+  common/import-stock-calibration.sh  # FlashForge's calibration into a first install (SoC)
   common/activate-loopscript.sh    # last step: Legacy LoopScript off, firmwareExe, boot logo
   soc/install-stack.sh             # Kalico and printer config
   soc/install-moonraker.sh         # Moonraker
@@ -310,6 +311,17 @@ have the same number of lines, differ only in the replaced lines, pass
 launch. Only then does it replace the original, and it is set to `chmod 777`
 and checked again. The original is kept as `app_startup.sh.opencreator-legacy`
 and in the backup. `/usr/prog/scripts/` itself is left in place.
+
+## Stock calibration import
+
+On a first SoC install (no OpenCreator `printer.cfg` yet), `install-stack.sh`
+runs `import-stock-calibration.sh` on the new config. It reads the
+`SAVE_CONFIG` block of FlashForge's `/usr/data/config/printer.cfg` and puts
+each section into the new config's block in place of the template's: input
+shaper, the four hotends' PID and the bed's PID. Sections only FlashForge's
+file has are added; the template's others (resonance damping) stay. The bed
+mesh is left out, since OpenCreator measures its own, and so is everything
+above the block. An existing OpenCreator config is never touched.
 
 ## SFTP
 

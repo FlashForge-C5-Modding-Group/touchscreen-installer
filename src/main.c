@@ -675,14 +675,20 @@ static void show_page(enum page next)
             static char buf[400];
             snprintf(buf, sizeof(buf),
                      "OpenCreator %s is already installed: %s, web UI %s, touchscreen %s.\n"
-                     "Recovery runs the whole setup again. Update Configs lets you pick the "
-                     "settings again and only changes what is different.",
+                     "Update again re-runs the update with this setup. Recovery runs the whole "
+                     "setup again. Update Configs lets you pick the settings again and only "
+                     "changes what is different.",
                      prev_version, strcmp(prev_mode, "soc") == 0 ? "printer SoC" : "tunneled",
                      prev_web, prev_touch);
             lv_label_set_text(body_label, buf);
         }
         add_button("Recovery", "recovery");
         add_button("Update Configs", "update-configs");
+        {
+            /* The same update as an available one, for re-applying it. */
+            lv_obj_t *again = add_button(LV_SYMBOL_REFRESH "  Update again", "update");
+            if (strcmp(prev_mode, "tunnel") == 0 && tunnel_blocked) disable_button(again);
+        }
         if (backup_found[0]) add_button(LV_SYMBOL_LOOP "  Restore backup", "restore-confirm");
         if (stock_found[0]) add_button(LV_SYMBOL_REFRESH "  Rollback to stock", "rollback-confirm");
         break;

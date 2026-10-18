@@ -2,7 +2,8 @@
 # x86-64 SDL demo only. Never invokes the real installer; the only file it
 # writes is a /tmp marker for the demo Wi-Fi connection.
 # OC_DEMO_OFFLINE=1 starts without internet (the Wi-Fi screens); the demo
-# networks accept any 8 to 63 character password.
+# networks accept any 8 to 63 character password. OC_DEMO_INSTALLED=0.4.7
+# shows the up-to-date screen.
 DEMO_ONLINE=/tmp/opencreator-demo-online
 case "$1" in
     check)
@@ -15,6 +16,12 @@ case "$1" in
         echo 'STAGE Demo mode: no printer files will be changed'
         echo 'WARN Demo warning: backup drive has 120 MB free'
         echo 'BACKUP /tmp/opencreator-installer-demo/opencreator-20260101T000000Z-1'
+        # OC_DEMO_INSTALLED=<version>: a previous install of that version
+        # (this installer's version shows the up-to-date screen).
+        if [ -n "${OC_DEMO_INSTALLED:-}" ]; then
+            echo "VERSION ${OC_DEMO_VERSION:-0.4.7}"
+            echo "PREVIOUS $OC_DEMO_INSTALLED soc fluidd yes"
+        fi
         if [ "${OC_DEMO_OFFLINE:-0}" = 1 ] && [ ! -e "$DEMO_ONLINE" ]; then
             echo 'NETWORK DOWN'
         else

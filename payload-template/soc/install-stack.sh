@@ -109,6 +109,8 @@ mkdir -p "$OC/config" "$OC/logs"
 done
 added=0
 kept=0
+fresh_printer_cfg=0
+[ -e "$OC/config/printer.cfg" ] || fresh_printer_cfg=1
 (cd "$TEMPLATE" && find . -type f) > "$WORK/files"
 while IFS= read -r file; do
     if [ -e "$OC/config/$file" ]; then
@@ -119,6 +121,11 @@ while IFS= read -r file; do
     fi
 done < "$WORK/files"
 echo "STAGE Config: $added files added, $kept existing files kept"
+# A first install takes the printer's calibration from FlashForge's config.
+if [ "$fresh_printer_cfg" = 1 ]; then
+    /bin/sh "$OC_PAYLOAD/common/import-stock-calibration.sh" \
+        "$DEMO_ROOT/usr/data/config/printer.cfg" "$OC/config/printer.cfg"
+fi
 [ -e "$OC/gcodes" ] || [ -L "$OC/gcodes" ] || ln -s /usr/data/gcodes "$OC/gcodes"
 mkdir -p "$DEMO_ROOT/usr/data/gcodes"
 sync
