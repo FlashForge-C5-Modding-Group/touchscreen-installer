@@ -96,6 +96,7 @@ every `startup/scripts/*.sh` in the background:
 | `01-fixnan.sh` | Enables legacy NaN for the kernel package |
 | `02-fixtime.sh` | Sets the clock once the network is up |
 | `05-entfix.sh` | Enables legacy NaN, mounts Entware on `/opt`, starts its services |
+| `06-sftp.sh` | Enables SFTP (see [SFTP](#sftp)) |
 | `08-mcu-wake.sh` | Wakes MCUs that Klipper can't reach |
 | `10-klipper.sh` | Runs Kalico from `klippy-env` (`-a /tmp/uds`), restarting it if it exits |
 | `20-msmr.sh` | Starts nginx, and runs Moonraker from `moonraker-env` with `-d /usr/data/opencreator/klipper` |
@@ -104,7 +105,7 @@ every `startup/scripts/*.sh` in the background:
 | `40-grumpyscreen.sh` | Runs GrumpyScreen on the touchscreen's input device, if installed |
 | `99-opencreator-updater.sh` | Merges config template updates |
 
-`tunneled.sh` runs `05-entfix.sh`, the camera and GrumpyScreen, then the socat
+`tunneled.sh` runs `05-entfix.sh`, `06-sftp.sh`, the camera and GrumpyScreen, then the socat
 bridge in a restart loop.
 
 ## Printer model detection
@@ -219,6 +220,7 @@ payload/
   common/install-loopscript.sh     # opencreator-fs LoopScript (both modes)
   common/flash-mcu-firmware.sh     # MCU firmware (both modes)
   common/enable-root.sh            # root login opencreator / FlashForge2026 (both modes)
+  common/enable-sftp.sh            # SFTP on the SSH login (both modes)
   common/activate-loopscript.sh    # last step: Legacy LoopScript off, firmwareExe, boot logo
   soc/install-stack.sh             # Kalico and printer config
   soc/install-moonraker.sh         # Moonraker
@@ -308,6 +310,21 @@ have the same number of lines, differ only in the replaced lines, pass
 launch. Only then does it replace the original, and it is set to `chmod 777`
 and checked again. The original is kept as `app_startup.sh.opencreator-legacy`
 and in the backup. `/usr/prog/scripts/` itself is left in place.
+
+## SFTP
+
+`86-enable-sftp.sh` gives the printer's SSH login SFTP, on port 22, in both
+modes. FlashForge's dropbear runs `/usr/libexec/sftp-server` for SFTP, which
+isn't there and can't be added to the read-only root. The step installs
+Entware's `openssh-sftp-server` (`/opt/libexec/sftp-server`), then runs
+opencreator-fs's `startup/scripts/06-sftp.sh`, which also runs at every boot.
+That script copies dropbear to `/usr/data/opencreator/bin/dropbear-sftp`,
+changes the path in the copy to `/opt/libexec/sftp-server` (the same length,
+so only three bytes change), checks the copy, bind-mounts it over
+`/usr/sbin/dropbear` and restarts the SSH listener. Nothing on the read-only
+root changes: without the script, the next boot runs the stock dropbear.
+SFTP is optional, so a problem here is a warning on the installer screen,
+not a failed install.
 
 ## Root login
 

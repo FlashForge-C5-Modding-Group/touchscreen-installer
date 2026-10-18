@@ -170,7 +170,8 @@ static void set_step_name(const char *script)
         {"install-moonraker", "Moonraker"}, {"install-timelapse", "Timelapse"},
         {"install-web", "Web UI"},
         {"install-grumpyscreen", "Touchscreen"}, {"install-tunnel", "Tunnel bridge"},
-        {"enable-root", "Root login"}, {"activate-loopscript", "Activating"},
+        {"enable-root", "Root login"}, {"enable-sftp", "SFTP"},
+        {"activate-loopscript", "Activating"},
         {"flash-mcu-firmware", "MCU firmware"},
     };
     const char *base = strrchr(script, '/');
