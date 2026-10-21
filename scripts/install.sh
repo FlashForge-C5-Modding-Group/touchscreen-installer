@@ -32,7 +32,8 @@ if [ -z "$DEMO_ROOT" ]; then
 fi
 STATE_DIR=${OC_STATE_DIR:-"$DEMO_ROOT/usr/data/opencreator"}
 INSTALL_STATE=$STATE_DIR/install.json
-INSTALLER_VERSION=0.4.8
+INSTALLER_VERSION=0.0.1
+INSTALLER_RELEASE="Public Alpha Version 1"
 MIN_FREE_KB=${OC_MIN_FREE_KB:-262144}
 BACKUP_FOLDERS="usr/prog/PROGRAM/software/firmwareExe usr/prog/moonraker usr/data/opencreator
 usr/data/mainsail usr/data/fluidd usr/data/nginx usr/prog/c5-tunnel-socat
@@ -277,6 +278,7 @@ latest_backup() {
 }
 check() {
     printf 'VERSION %s\n' "$INSTALLER_VERSION"
+    printf 'RELEASE %s\n' "$INSTALLER_RELEASE"
     if detect_model; then
         printf 'MODEL %s %s\n' "$MACHINE" "$PID"
     else

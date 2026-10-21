@@ -8,7 +8,9 @@ The flow is:
 
 1. Check the printer model and the FlashForge kernel package (see below).
    On an unsupported kernel package, stop without changing anything.
-2. Choose installation on the printer SoC or tunnel mode.
+2. Choose installation on the printer SoC or tunnel mode. Tunnel mode asks for a
+   password first (`OC_TUNNEL_PASSWORD` in `src/main.c`), unless the install
+   record already says tunneled.
 3. In SoC mode, choose Fluidd (recommended) or Mainsail. In both modes, choose whether to
    install the recommended GrumpyScreen touchscreen. With tunnel mode, the
    finish page says to set `host` under `[moonraker]` in

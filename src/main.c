@@ -16,7 +16,8 @@
 
 enum page { PAGE_CHECK, PAGE_MODE, PAGE_WEB, PAGE_TOUCHSCREEN, PAGE_READY,
             PAGE_RUNNING, PAGE_DONE, PAGE_ERROR, PAGE_RESTORE, PAGE_KERNEL,
-            PAGE_INSTALLED, PAGE_ROLLBACK, PAGE_UPDATE, PAGE_OFFLINE, PAGE_WIFI_PASS };
+            PAGE_INSTALLED, PAGE_ROLLBACK, PAGE_UPDATE, PAGE_OFFLINE, PAGE_WIFI_PASS,
+            PAGE_TUNNEL_PASS };
 static enum page page_now;
 static const char *payload_path, *backup_path, *script_path;
 static const char *mode = "soc", *web = "fluidd";
@@ -41,6 +42,9 @@ static char current_action[16];
 static bool kernel_ok;
 static char kernel_text[160] = "unknown";
 static char installer_version[32] = "?";
+/* The release's name for people ("Public Alpha Version 1"); the
+ * version above is the one-word id the install record compares. */
+static char release_name[64];
 static char mcu_drive[48] = "none", mcu_boards[48] = "none";
 static lv_obj_t *version_label;
 static uint64_t running_since, splash_until;
@@ -63,6 +67,11 @@ static int wifi_count;
 static bool wifi_scanned;
 static char wifi_ssid[64], wifi_error[200], wifi_current[64];
 static lv_obj_t *wifi_list, *wifi_ta, *wifi_kb, *wifi_back, *wifi_button;
+/* Tunneled needs this password, typed on the Wi-Fi keyboard, unless the
+ * printer is already tunneled. */
+#define OC_TUNNEL_PASSWORD "You're funny, I am not about to leak the tunneled password yet!"
+static lv_obj_t *tunnel_back;
+static bool tunnel_pass_wrong;
 static char machine[32] = "unknown";
 static bool model_known;
 static char backup_found[512];
@@ -130,6 +139,7 @@ static const char *page_icon(enum page p)
     case PAGE_UPDATE: return LV_SYMBOL_UPLOAD;
     case PAGE_OFFLINE:
     case PAGE_WIFI_PASS: return LV_SYMBOL_WIFI;
+    case PAGE_TUNNEL_PASS: return LV_SYMBOL_EYE_CLOSE;
     default:         return LV_SYMBOL_HOME;
     }
 }
@@ -143,7 +153,7 @@ static const char *model_name(void)
 
 static void set_title(enum page p, const char *text)
 {
-    static char buf[160];
+    static char buf[176];
     snprintf(buf, sizeof(buf), "%s  %s", page_icon(p), text);
     lv_label_set_text(title_label, buf);
 }
@@ -269,14 +279,27 @@ static void update_brand(void)
     lv_label_set_text(brand_label, buf);
 }
 
+/* A version for people: this release's name, else "Installer <version>". */
+static const char *release_label(const char *version)
+{
+    static char buf[2][96];
+    static int n;
+    char *out = buf[n++ % 2];
+    if (release_name[0] && strcmp(version, installer_version) == 0)
+        snprintf(out, sizeof(buf[0]), "%s", release_name);
+    else
+        snprintf(out, sizeof(buf[0]), "Installer %s", version);
+    return out;
+}
+
 static void update_version(void)
 {
     static char buf[256];
     char boards[64] = "";
     if (strcmp(mcu_boards, "none") != 0)
         snprintf(boards, sizeof(boards), " (boards %.8s)", mcu_boards);
-    snprintf(buf, sizeof(buf), "Installer %s  |  MCU firmware %.8s%s  |  Kernel %.40s  |  Built %s",
-             installer_version, mcu_drive, boards, kernel_text, __DATE__);
+    snprintf(buf, sizeof(buf), "%s  |  MCU firmware %.8s%s  |  Kernel %.40s  |  Built %s",
+             release_label(installer_version), mcu_drive, boards, kernel_text, __DATE__);
     lv_label_set_text(version_label, buf);
 }
 
@@ -397,6 +420,18 @@ static void wifi_pick(lv_event_t *event)
 static void wifi_keyboard(lv_event_t *event)
 {
     lv_event_code_t code = lv_event_get_code(event);
+    if (page_now == PAGE_TUNNEL_PASS) {
+        if (code == LV_EVENT_CANCEL) show_page(PAGE_MODE);
+        if (code != LV_EVENT_READY) return;
+        if (strcmp(lv_textarea_get_text(wifi_ta), OC_TUNNEL_PASSWORD) == 0) {
+            mode = "tunnel"; web = "none"; show_page(PAGE_TOUCHSCREEN);
+        } else {
+            tunnel_pass_wrong = true;
+            lv_textarea_set_text(wifi_ta, "");
+            show_page(PAGE_TUNNEL_PASS);
+        }
+        return;
+    }
     if (code == LV_EVENT_READY) connect_wifi(lv_textarea_get_text(wifi_ta));
     else if (code == LV_EVENT_CANCEL) show_page(PAGE_OFFLINE);
 }
@@ -408,7 +443,13 @@ static void action_button(lv_event_t *event)
     if (strcmp(action, "splash-quit") == 0) { splash_quit = true; return; }
     if (strcmp(action, "soc") == 0) { mode = "soc"; show_page(PAGE_WEB); }
     else if (strcmp(action, "tunnel") == 0) {
-        mode = "tunnel"; web = "none"; show_page(PAGE_TOUCHSCREEN);
+        if (strcmp(prev_mode, "tunnel") == 0) {
+            mode = "tunnel"; web = "none"; show_page(PAGE_TOUCHSCREEN);
+        } else {
+            tunnel_pass_wrong = false;
+            lv_textarea_set_text(wifi_ta, "");
+            show_page(PAGE_TUNNEL_PASS);
+        }
     } else if (strcmp(action, "mainsail") == 0 || strcmp(action, "fluidd") == 0) {
         web = action; show_page(PAGE_TOUCHSCREEN);
     } else if (strcmp(action, "touch-yes") == 0) {
@@ -550,8 +591,9 @@ static void show_page(enum page next)
     lv_obj_add_flag(wifi_ta, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(wifi_kb, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(wifi_back, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(tunnel_back, LV_OBJ_FLAG_HIDDEN);
     lv_obj_set_style_text_color(body_label, lv_color_hex(OC_COLOR_TEXT), 0);
-    if (next == PAGE_WIFI_PASS) lv_obj_add_flag(status_label, LV_OBJ_FLAG_HIDDEN);
+    if (next == PAGE_WIFI_PASS || next == PAGE_TUNNEL_PASS) lv_obj_add_flag(status_label, LV_OBJ_FLAG_HIDDEN);
     else lv_obj_clear_flag(status_label, LV_OBJ_FLAG_HIDDEN);
     if (start_page) lv_obj_clear_flag(quit_button, LV_OBJ_FLAG_HIDDEN);
     else lv_obj_add_flag(quit_button, LV_OBJ_FLAG_HIDDEN);
@@ -636,19 +678,30 @@ static void show_page(enum page next)
             lv_obj_clear_flag(wifi_back, LV_OBJ_FLAG_HIDDEN);
         }
         break;
+    case PAGE_TUNNEL_PASS:
+        set_title(next, "Tunneled mode password");
+        lv_label_set_text(body_label, tunnel_pass_wrong
+            ? "That password isn't right. Type it again, then press " LV_SYMBOL_OK "."
+            : "Tunneled mode needs a password. Type it, then press " LV_SYMBOL_OK " on the keyboard.");
+        lv_obj_set_style_text_color(body_label, lv_color_hex(tunnel_pass_wrong
+            ? OC_COLOR_DANGER : OC_COLOR_TEXT), 0);
+        lv_obj_clear_flag(wifi_ta, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_clear_flag(wifi_kb, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_clear_flag(tunnel_back, LV_OBJ_FLAG_HIDDEN);
+        break;
     case PAGE_UPDATE:
         {
-            static char title[96], from_to[80], setup[96];
+            static char title[160], from_to[96], setup[96];
             bool tunnel = strcmp(prev_mode, "tunnel") == 0;
             snprintf(title, sizeof(title), "Update available:  %s  " LV_SYMBOL_RIGHT "  %s",
-                     prev_version, installer_version);
+                     prev_version, release_name[0] ? release_name : installer_version);
             set_title(next, title);
             lv_label_set_text(body_label,
                 "Updates OpenCreator in place with your current setup. Your configs and "
                 "files are kept; OpenCreator files you changed are saved to the backup.");
             lv_obj_clear_flag(summary_box, LV_OBJ_FLAG_HIDDEN);
             add_summary_row("Installed", prev_version);
-            snprintf(from_to, sizeof(from_to), "%s (new)", installer_version);
+            snprintf(from_to, sizeof(from_to), "%s (new)", release_label(installer_version));
             add_summary_row("This installer", from_to);
             snprintf(setup, sizeof(setup), "%s%s%s, touchscreen %s",
                      tunnel ? "Tunneled" : "Printer SoC", tunnel ? "" : ", ",
@@ -674,11 +727,12 @@ static void show_page(enum page next)
         {
             static char buf[400];
             snprintf(buf, sizeof(buf),
-                     "OpenCreator %s is already installed: %s, web UI %s, touchscreen %s.\n"
+                     "%s is already installed: %s, web UI %s, touchscreen %s.\n"
                      "Update again re-runs the update with this setup. Recovery runs the whole "
                      "setup again. Update Configs lets you pick the settings again and only "
                      "changes what is different.",
-                     prev_version, strcmp(prev_mode, "soc") == 0 ? "printer SoC" : "tunneled",
+                     release_name[0] ? release_name : prev_version,
+                     strcmp(prev_mode, "soc") == 0 ? "printer SoC" : "tunneled",
                      prev_web, prev_touch);
             lv_label_set_text(body_label, buf);
         }
@@ -926,6 +980,9 @@ static void process_line(char *line)
         update_version();
     } else if (strncmp(line, "VERSION ", 8) == 0) {
         snprintf(installer_version, sizeof(installer_version), "%.30s", line + 8);
+        update_version();
+    } else if (strncmp(line, "RELEASE ", 8) == 0) {
+        snprintf(release_name, sizeof(release_name), "%.62s", line + 8);
         update_version();
     } else if (strncmp(line, "MCU ", 4) == 0) {
         sscanf(line + 4, "%47s %47s", mcu_drive, mcu_boards);
@@ -1397,6 +1454,9 @@ int main(int argc, char **argv)
     wifi_back = make_button(screen, LV_SYMBOL_LEFT "  Networks", "wifi-back", false, 190, 50);
     lv_obj_align(wifi_back, LV_ALIGN_TOP_RIGHT, -30, 140);
     lv_obj_add_flag(wifi_back, LV_OBJ_FLAG_HIDDEN);
+    tunnel_back = make_button(screen, LV_SYMBOL_LEFT "  Back", "back", false, 190, 50);
+    lv_obj_align(tunnel_back, LV_ALIGN_TOP_RIGHT, -30, 140);
+    lv_obj_add_flag(tunnel_back, LV_OBJ_FLAG_HIDDEN);
 
     wifi_kb = lv_keyboard_create(screen);
     lv_obj_set_size(wifi_kb, width, height - 210);
