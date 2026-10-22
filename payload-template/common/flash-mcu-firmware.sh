@@ -28,7 +28,7 @@ die() { echo "ERROR $*"; exit 1; }
 # FlashForge's .tgz/.tar.xz members are often plain tar; the printer's
 # busybox tar cannot decompress, so pick the method from the magic bytes.
 extract() {  # extract ARCHIVE DEST
-    magic=$(dd if="$1" bs=1 count=2 2>/dev/null | od -An -tx1 | tr -d ' \n')
+    magic=$(dd if="$1" bs=1 count=2 2>/dev/null | hexdump -v -e '2/1 "%02x"' 2>/dev/null) || magic=
     case "$magic" in
         1f8b) gunzip -c "$1" | tar -xf - -C "$2" ;;
         fd37) xz -dc "$1" | tar -xf - -C "$2" ;;

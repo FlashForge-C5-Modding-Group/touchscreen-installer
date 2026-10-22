@@ -51,6 +51,7 @@ pids_of() {
     for d in /proc/[0-9]*; do
         tr '\0' ' ' < "$d/cmdline" 2>/dev/null | grep -q "$1" && echo "${d#/proc/}"
     done
+    return 0
 }
 STREAM=$(pids_of 'mjpg_streamer -i')
 LOOPS=
@@ -62,8 +63,12 @@ trap resume EXIT INT TERM HUP
 sleep 2
 
 mkdir -p "$(dirname "$LOG")"
-chmod 755 "$FW_DIR/V4L2_FWUpdate_mips"
-"$FW_DIR/V4L2_FWUpdate_mips" -D "$index" -d "$FW_DIR/x$WANT.bin" -V "$WANT" > "$LOG" 2>&1 || true
+# The USB drive may not allow exec, so run the flasher from a copy
+WORK=$(mktemp -d "${TMPDIR:-/tmp}/oc-camera.XXXXXX") || warn "cannot create a work directory"
+trap 'resume; rm -rf "$WORK"' EXIT INT TERM HUP
+cp "$FW_DIR/V4L2_FWUpdate_mips" "$FW_DIR/x$WANT.bin" "$WORK/" && chmod 755 "$WORK/V4L2_FWUpdate_mips" ||
+    warn "cannot copy the flasher"
+"$WORK/V4L2_FWUpdate_mips" -D "$index" -d "$WORK/x$WANT.bin" -V "$WANT" > "$LOG" 2>&1 || true
 sleep 3
 now=$(camera_version) || now=
 grep -q "Download finished(0)" "$LOG" && [ "$now" = "$WANT" ] ||
