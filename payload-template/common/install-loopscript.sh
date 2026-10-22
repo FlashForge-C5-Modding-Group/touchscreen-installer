@@ -34,13 +34,14 @@ echo "STAGE Installing LoopScript"
 mkdir -p "$OCDIR"
 # Laid over the installed folders: extra files (custom startup scripts and
 # such) stay, see oc_overlay.
-for part in startup firmware tunneled moonraker fluidd plugin-manager; do
+for part in startup firmware tunneled moonraker fluidd plugin-manager mcu-flash; do
     [ -d "$FS/opencreator/$part" ] || continue
     oc_overlay "$FS/opencreator/$part" "$OCDIR/$part" "$OCDIR/.installed/$part.md5"
 done
 cp "$FS/opencreator/version.txt" "$OCDIR/version.txt"
 chmod 755 "$OCDIR/startup/startup.sh" "$OCDIR"/startup/scripts/*.sh "$OCDIR/firmware/firmwareExe"
 [ ! -f "$OCDIR/plugin-manager/oc-plugin" ] || chmod 755 "$OCDIR/plugin-manager/oc-plugin"
+[ ! -f "$OCDIR/mcu-flash/oc-mcu-flash" ] || chmod 755 "$OCDIR/mcu-flash/oc-mcu-flash"
 chmod 644 "$OCDIR/tunneled/tunneled.sh"
 
 oc_overlay "$FS/nginx/conf.d" "$NGINX_CONF_D" "$OCDIR/.installed/nginx-conf.d.md5"
