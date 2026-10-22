@@ -83,6 +83,7 @@ kernel_supported() {
     case "$KERNEL_PACKAGE" in
         2.0.1|2.0.2|2.0.3|2.0.4|2.0.5|2.0.6) NAN_ADDR=0x00a130d1 ;;
         2.0.7) NAN_ADDR=0x00B330D1 ;;
+        2.0.8) NAN_ADDR=0x00B030D1 ;;
         *) KERNEL_PACKAGE=${KERNEL_PACKAGE:-unknown}; NAN_ADDR=; return 1 ;;
     esac
 }

@@ -136,6 +136,7 @@ package (`/usr/prog/PROGRAM/kernel/<version>`):
 | --- | --- |
 | 2.0.1 to 2.0.6 | `0x00a130d1` |
 | 2.0.7 (FlashForge 1.9.9) | `0x00B330D1` |
+| 2.0.8 (FlashForge 2.0.0) | `0x00B030D1` |
 
 On any other package the installer stops on *Unsupported FlashForge firmware*,
 and LoopScript's `01-fixnan.sh` writes nothing. `OC_KERNEL_PACKAGE` overrides
