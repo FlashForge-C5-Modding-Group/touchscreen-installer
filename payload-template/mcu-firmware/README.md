@@ -1,8 +1,10 @@
 # MCU firmware payload
 
-`common/flash-mcu-firmware.sh` (run by `installers/soc/05-flash-mcu-firmware.sh`
-and `installers/tunnel/05-flash-mcu-firmware.sh`) expects exactly one
-package here:
+`common/flash-mcu-firmware.sh` (run by `installers/soc/95-flash-mcu-firmware.sh`
+and `installers/tunnel/95-flash-mcu-firmware.sh`) flashes a package from here
+named for the printer model (`Creator5Pro-*.tgz` or `Creator5-*.tgz`). If there are
+several, it uses the newest build, by `build_timestamp_utc` in the manifest, so older
+packages can stay in the folder. Each package needs:
 
 ```text
 <name>.tgz

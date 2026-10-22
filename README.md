@@ -58,6 +58,13 @@ Both modes start with:
    with Kalico's `scripts/build_c5_update.py all` (one `--template`/`--output`
    pair per model; it needs `C5_UPDATE_PASSPHRASE`) and add them with
    `MCU_PACKAGE="Creator5Pro-....tgz Creator5-....tgz" make usb`.
+4. **Camera firmware** (`96-flash-camera-firmware.sh`): FlashForge's camera
+   firmware 1226 from their 2.0.0 update, which they ship but don't flash yet.
+   Only a camera reporting an older version (USB `05a3:9230`) is flashed, with
+   FlashForge's own `V4L2_FWUpdate_mips`, after checking `SHA256SUMS`; the
+   stream is paused meanwhile. Against 1224 only the image tuning tables and
+   the USB maker name change. Any problem is a warning, never a failed install.
+   Log: `/usr/data/logs/oc-camera-firmware.log`.
 
 SoC mode then installs:
 
@@ -222,6 +229,8 @@ payload/
   common/install-entware.sh        # Entware and legacy NaN (both modes)
   common/install-loopscript.sh     # opencreator-fs LoopScript (both modes)
   common/flash-mcu-firmware.sh     # MCU firmware (both modes)
+  common/flash-camera-firmware.sh  # camera firmware 1226 (both modes)
+  camera-firmware/                 # FlashForge's x1226.bin, V4L2_FWUpdate_mips, SHA256SUMS
   common/enable-root.sh            # root login opencreator / FlashForge2026 (both modes)
   common/enable-sftp.sh            # SFTP on the SSH login (both modes)
   common/import-stock-calibration.sh  # FlashForge's calibration into a first install (SoC)

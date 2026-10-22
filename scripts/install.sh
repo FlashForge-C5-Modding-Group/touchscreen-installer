@@ -292,11 +292,15 @@ check() {
         printf 'KERNEL MISMATCH %s\n' "$KERNEL_PACKAGE"
     fi
     # MCU firmware on the drive for this model, and what the boards last got.
+    # The newest build wins, the same pick as common/flash-mcu-firmware.sh.
+    manifest=$(for m in "$PAYLOAD/mcu-firmware/${MACHINE:-none}"-*.tgz.manifest.json; do
+        [ -f "$m" ] && [ -f "${m%.manifest.json}" ] || continue
+        built=$(sed -n 's/.*"build_timestamp_utc": *"\([^"]*\)".*/\1/p' "$m" | head -n 1)
+        echo "${built:-0} $m"
+    done | sort | tail -n 1)
     mcu=none
-    for manifest in "$PAYLOAD/mcu-firmware/${MACHINE:-none}"-*.tgz.manifest.json; do
-        [ -f "$manifest" ] || continue
-        mcu=$(sed -n 's/.*"commit": *"\([0-9a-f]\{7,40\}\)".*/\1/p' "$manifest" | head -n 1)
-    done
+    [ -z "$manifest" ] ||
+        mcu=$(sed -n 's/.*"commit": *"\([0-9a-f]\{7,40\}\)".*/\1/p' "${manifest#* }" | head -n 1)
     flashed=$(cat "$STATE_DIR/mcu-firmware.commit" 2>/dev/null || echo none)
     printf 'MCU %s %s\n' "${mcu:-none}" "$flashed"
     if [ -f "$INSTALL_STATE" ]; then

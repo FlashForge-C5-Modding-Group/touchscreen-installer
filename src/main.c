@@ -183,6 +183,7 @@ static void set_step_name(const char *script)
         {"enable-root", "Root login"}, {"enable-sftp", "SFTP"},
         {"activate-loopscript", "Activating"},
         {"flash-mcu-firmware", "MCU firmware"},
+        {"flash-camera-firmware", "Camera firmware"},
     };
     const char *base = strrchr(script, '/');
     base = base ? base + 1 : script;

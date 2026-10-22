@@ -7,7 +7,7 @@
 # Kalico MCU firmware already being flashed, regardless of where
 # Klipper itself ends up running.
 #
-# Expects exactly one package at $OC_PAYLOAD/mcu-firmware/*.tgz with a
+# Expects packages at $OC_PAYLOAD/mcu-firmware/*.tgz, each with a
 # matching *.tgz.sha256 and *.tgz.manifest.json sidecar, in the format
 # produced by creator-5-update-creator (MCU_MODE=replacement). For
 # local testing, copy one of the example packages from the root of the
@@ -44,13 +44,20 @@ fi
 # Like the stock USB update, only a package named for this model is used:
 # Creator5Pro-*.tgz on a Creator 5 Pro, Creator5-*.tgz on a Creator 5.
 : "${OC_MACHINE:?}"
-set -- "$FW_DIR/$OC_MACHINE"-*.tgz
-if [ ! -e "$1" ]; then
+# With several, the newest build (build_timestamp_utc in its manifest) wins.
+PKG=$(for pkg in "$FW_DIR/$OC_MACHINE"-*.tgz; do
+    [ -f "$pkg" ] || continue
+    built=$(sed -n 's/.*"build_timestamp_utc": *"\([^"]*\)".*/\1/p' "$pkg.manifest.json" 2>/dev/null | head -n 1)
+    echo "${built:-0} $pkg"
+done | sort | tail -n 1)
+newest=${PKG%% *}
+PKG=${PKG#* }
+[ "$newest" != 0 ] || newest=
+if [ -z "$PKG" ]; then
     echo "STAGE No $OC_MACHINE MCU firmware package in $FW_DIR, skipping"
     exit 0
 fi
-[ "$#" -eq 1 ] || die "expected one $OC_MACHINE-*.tgz in $FW_DIR, found $#"
-PKG=$1
+echo "STAGE Using $(basename "$PKG")${newest:+, built $newest}"
 SHA_SIDECAR="$PKG.sha256"
 MANIFEST="$PKG.manifest.json"
 
