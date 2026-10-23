@@ -329,7 +329,7 @@ check() {
     mcu=none
     [ -z "$manifest" ] ||
         mcu=$(sed -n 's/.*"commit": *"\([0-9a-f]\{7,40\}\)".*/\1/p' "${manifest#* }" | head -n 1)
-    flashed=$(head -n 1 "$STATE_DIR/mcu-firmware.commit" 2>/dev/null)
+    flashed=$(head -n 1 "$STATE_DIR/mcu-firmware.commit" 2>/dev/null) || flashed=
     flashed=${flashed:-none}
     printf 'MCU %s %s\n' "${mcu:-none}" "$flashed"
     if [ -f "$INSTALL_STATE" ]; then
