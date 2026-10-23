@@ -32,8 +32,8 @@ if [ -z "$DEMO_ROOT" ]; then
 fi
 STATE_DIR=${OC_STATE_DIR:-"$DEMO_ROOT/usr/data/opencreator"}
 INSTALL_STATE=$STATE_DIR/install.json
-INSTALLER_VERSION=0.0.1.1
-INSTALLER_RELEASE="Public Alpha 1 Fix 1"
+INSTALLER_VERSION=0.0.1.2
+INSTALLER_RELEASE="Public Alpha 1 Fix 2"
 MIN_FREE_KB=${OC_MIN_FREE_KB:-262144}
 BACKUP_FOLDERS="usr/prog/PROGRAM/software/firmwareExe usr/prog/moonraker usr/data/opencreator
 usr/data/mainsail usr/data/fluidd usr/data/nginx usr/prog/c5-tunnel-socat
@@ -277,8 +277,12 @@ space_ok() {
 }
 remove_foreign() {
     for old in $(old_ff_versions); do
+        case $old in
+            usr/prog/PROGRAM/?*/?*) ;;
+            *) die "refusing to remove unexpected path /$old" ;;
+        esac
         stage "Removing the old FlashForge version /$old"
-        rm -rf "${DEMO_ROOT:?}/$old" || die "could not remove /$old"
+        rm -rf "$DEMO_ROOT/$old" || die "could not remove /$old"
     done
     for folder in $(foreign_folders); do
         case $folder in
@@ -325,7 +329,8 @@ check() {
     mcu=none
     [ -z "$manifest" ] ||
         mcu=$(sed -n 's/.*"commit": *"\([0-9a-f]\{7,40\}\)".*/\1/p' "${manifest#* }" | head -n 1)
-    flashed=$(cat "$STATE_DIR/mcu-firmware.commit" 2>/dev/null || echo none)
+    flashed=$(head -n 1 "$STATE_DIR/mcu-firmware.commit" 2>/dev/null)
+    flashed=${flashed:-none}
     printf 'MCU %s %s\n' "${mcu:-none}" "$flashed"
     if [ -f "$INSTALL_STATE" ]; then
         previous_version=$(sed -n 's/^  "installer_version": "\([^"]*\)",$/\1/p' "$INSTALL_STATE" | head -n 1)

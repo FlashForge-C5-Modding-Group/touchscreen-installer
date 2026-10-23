@@ -35,6 +35,11 @@ sha256sum Creator5Pro-all-mcus-b4c9c5e9-20261008.tgz \
 
 The script reads the firmware's `repository.commit` from the manifest
 and records it in `/usr/data/opencreator/mcu-firmware.commit` once
-flashed, so re-running the installer with the same package is a no-op.
+flashed, together with FlashForge's newest `control` package (name and time).
+A later run skips flashing only if the boards are known to run that commit:
+when Klipper is up, all four boards must report it as their `mcu_version`;
+otherwise the record must match and the `control` package must be unchanged.
+A FlashForge update (stock OTA or USB) reflashes the boards from a new
+`control` package, so the next install flashes them again.
 Leave this directory empty to skip MCU flashing entirely (the step
 prints a STAGE message and exits 0).

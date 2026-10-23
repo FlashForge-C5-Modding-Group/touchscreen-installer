@@ -107,9 +107,33 @@ fi
 COMMIT=$(sed -n 's/.*"commit": *"\([0-9a-f]\{7,40\}\)".*/\1/p' "$MANIFEST" | head -n 1)
 [ -n "$COMMIT" ] || die "could not read repository.commit from $MANIFEST"
 
-if [ -f "$MARKER" ] && [ "$(cat "$MARKER")" = "$COMMIT" ]; then
+# Skipped only when the boards are known to run $COMMIT. A FlashForge update
+# (stock OTA or USB) reflashes them from its control package without touching
+# MARKER, so MARKER also holds the control package it was written next to.
+# When Klipper is up, the versions the boards report decide instead.
+control_stamp() {
+    d=$(for c in "$DEMO_ROOT"/usr/prog/PROGRAM/control/[0-9]*/; do [ -d "$c" ] && basename "$c"; done |
+        sort -t. -k1,1n -k2,2n -k3,3n | tail -n 1)
+    [ -n "$d" ] || { echo none; return; }
+    echo "$d $(stat -c %Y "$DEMO_ROOT/usr/prog/PROGRAM/control/$d" 2>/dev/null || echo 0)"
+}
+STAMP=$(control_stamp)
+SHORT=$(printf '%.8s' "$COMMIT")
+reported=$(curl -s -m 5 "http://127.0.0.1:7125/printer/objects/query?mcu=mcu_version&mcu%20eboard=mcu_version&mcu%20eheaterboard=mcu_version&mcu%20levelboard=mcu_version" 2>/dev/null |
+    grep -o '"mcu_version": *"[^"]*"' | sed 's/.*"\([^"]*\)"$/\1/')
+if [ -z "$DEMO_ROOT" ] && [ "$(printf '%s\n' "$reported" | grep -c .)" -eq 4 ]; then
+    if [ "$(printf '%s\n' "$reported" | grep -c "^$SHORT")" -eq 4 ]; then
+        echo "STAGE All four boards report $SHORT, skipping"
+        printf '%s\n%s\n' "$COMMIT" "$STAMP" > "$MARKER"
+        exit 0
+    fi
+    echo "STAGE Boards report $(printf '%s ' $reported)- flashing $SHORT"
+elif [ -f "$MARKER" ] && [ "$(sed -n 1p "$MARKER")" = "$COMMIT" ] &&
+    [ "$(sed -n 2p "$MARKER")" = "$STAMP" ]; then
     echo "STAGE MCU firmware already at commit $COMMIT, skipping"
     exit 0
+elif [ -f "$MARKER" ] && [ "$(sed -n 1p "$MARKER")" = "$COMMIT" ]; then
+    echo "STAGE FlashForge's control package changed since the last flash (a stock update reflashes the boards); flashing again"
 fi
 
 WORK=$(mktemp -d "${TMPDIR:-/tmp}/oc-mcu-flash.XXXXXX") || die "cannot create work directory"
@@ -199,5 +223,7 @@ flash_isp GD_M3 mainBoardGD.hex
 [ "$FAILED" -eq 0 ] || die "one or more MCUs failed to flash; firmware not marked as installed"
 
 mkdir -p "$(dirname "$MARKER")"
-echo "$COMMIT" >"$MARKER"
+printf '%s
+%s
+' "$COMMIT" "$STAMP" >"$MARKER"
 echo "STAGE MCU firmware flashed successfully (commit $COMMIT)"

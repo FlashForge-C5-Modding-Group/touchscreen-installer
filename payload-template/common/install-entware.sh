@@ -24,6 +24,35 @@ esac
 
 die() { echo "ERROR $*"; exit 1; }
 
+# opkg reports "Updated list" even when the download was an error page (a
+# redirect or captive portal), and then knows no packages at all. Check for
+# a package every feed has; fetch the list again over http, then https.
+CONF=/opt/etc/opkg.conf
+# The saved list itself (gzipped), not opkg's view, which includes installed packages.
+list_ok() { { gunzip -c "$lists/$feed" 2>/dev/null || cat "$lists/$feed"; } 2>/dev/null | grep -q '^Package: tar$'; }
+repair_package_list() {
+    lists=$(sed -n 's/^lists_dir [a-z]* //p' "$CONF" | head -n 1)
+    lists=${lists:-/opt/var/opkg-lists}
+    feed=$(sed -n 's/^src\/gz \([^ ]*\) .*/\1/p' "$CONF" | head -n 1)
+    feed=${feed:-entware}
+    list_ok && return 0
+    echo "WARN Entware's package list is empty or damaged ($(wc -c < "$lists/$feed" 2>/dev/null || echo 0) bytes); downloading it again"
+    for arch in mipsel-3.4 mipsel-3x all; do
+        grep -q "^arch $arch " "$CONF" || echo "arch $arch 150" >> "$CONF"
+    done
+    mkdir -p "$lists"
+    for url in "$ENTWARE/Packages.gz" "https://bin.entware.net/mipselsf-k3.4/Packages.gz"; do
+        rm -f "$lists/$feed.tmp"
+        { /opt/bin/curl -fsSL -m 180 "$url" 2>/dev/null || wget -q -O - "$url"; } > "$lists/$feed.tmp" &&
+            gunzip -c "$lists/$feed.tmp" 2>/dev/null | grep -q '^Package: tar$' &&
+            mv "$lists/$feed.tmp" "$lists/$feed" && list_ok && return 0
+        echo "STAGE Package list from $url unusable ($(wc -c < "$lists/$feed.tmp" 2>/dev/null || echo 0) bytes)"
+    done
+    rm -f "$lists/$feed.tmp"
+    df -h /opt 2>/dev/null | tail -n 1 | sed 's/^/STAGE Space on \/opt: /'
+    die "Entware's package list can't be downloaded; check the printer's internet (a captive portal or DNS filter can block bin.entware.net)"
+}
+
 if [ -n "$DEMO_ROOT" ]; then
     mkdir -p "$OPT_STORE"
     echo "STAGE Demo mode: would enable legacy NaN ($OC_NAN_ADDR), bind-mount" \
@@ -59,6 +88,7 @@ done
 if [ -n "$missing" ]; then
     echo "STAGE Updating Entware package lists"
     /opt/bin/opkg update || die "opkg update failed"
+    repair_package_list
     echo "STAGE Installing Entware packages:$missing (this takes a while)"
     # shellcheck disable=SC2086
     oc_run_staged /opt/bin/opkg install $missing || die "opkg install failed"
