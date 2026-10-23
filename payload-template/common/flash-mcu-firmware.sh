@@ -36,6 +36,10 @@ extract() {  # extract ARCHIVE DEST
     esac
 }
 
+# OC_IGNORE_MCU_CHECKSUM=1 ("Flash anyway"): a package that fails its sha256
+# is still flashed, but only if every file inside matches md5sum.list.
+IGNORE_SUM=${OC_IGNORE_MCU_CHECKSUM:-0}
+
 if [ ! -d "$FW_DIR" ]; then
     echo "STAGE No MCU firmware payload staged, skipping"
     exit 0
@@ -66,14 +70,39 @@ MANIFEST="$PKG.manifest.json"
 
 echo "STAGE Verifying MCU firmware package checksum"
 PKG_NAME=$(basename "$PKG")
-expected=$(cut -d' ' -f1 < "$SHA_SIDECAR")
-if command -v sha256sum >/dev/null 2>&1; then
-    actual=$(sha256sum < "$PKG" | cut -d' ' -f1)
-else
-    actual=$(LD_LIBRARY_PATH=/usr/prog/openssl-1.0.2d/lib /usr/prog/openssl-1.0.2d/bin/openssl \
-        dgst -sha256 < "$PKG" | sed 's/^.*= *//')
+expected=$(cut -d' ' -f1 < "$SHA_SIDECAR" | tr -d '\r' | tr 'A-F' 'a-f')
+# The first tool that prints a real hash wins: a sha256sum on PATH can be a
+# broken link or applet left by another mod.
+sha256_of() {
+    for tool in sha256sum "busybox sha256sum" /opt/bin/sha256sum ff-openssl openssl; do
+        case $tool in
+            ff-openssl) out=$(LD_LIBRARY_PATH=/usr/prog/openssl-1.0.2d/lib \
+                /usr/prog/openssl-1.0.2d/bin/openssl dgst -sha256 < "$1" 2>/dev/null | sed 's/^.*= *//') ;;
+            openssl) out=$(openssl dgst -sha256 < "$1" 2>/dev/null | sed 's/^.*= *//') ;;
+            *) out=$($tool < "$1" 2>/dev/null | cut -d' ' -f1) ;;
+        esac
+        case $out in
+            [0-9a-f][0-9a-f][0-9a-f][0-9a-f]*) [ ${#out} -eq 64 ] && { echo "$out"; return 0; } ;;
+        esac
+    done
+    return 1
+}
+if ! actual=$(sha256_of "$PKG"); then
+    [ "$IGNORE_SUM" = 1 ] || { echo "MCUFORCE"; die "no working sha256 tool to check $PKG_NAME"; }
+    echo "WARN No sha256 tool; flashing $PKG_NAME after checking the files inside"
+elif [ "$actual" != "$expected" ] && [ "$IGNORE_SUM" = 1 ]; then
+    echo "WARN $PKG_NAME failed its checksum; flashing it after checking the files inside"
+elif [ "$actual" != "$expected" ]; then
+    # A flaky USB read gives a different hash each time; read it once more
+    again=$(sha256_of "$PKG")
+    size=$(wc -c < "$PKG" | tr -d ' ')
+    echo "ERROR expected $expected"
+    echo "ERROR got      $actual (again: $again), $size bytes"
+    # Lets the installer offer "Flash anyway"
+    echo "MCUFORCE"
+    [ "$again" = "$actual" ] || die "checksum mismatch for $PKG_NAME: the USB drive gave different data on each read; try another drive"
+    die "checksum mismatch for $PKG_NAME: the file on the USB drive is damaged; extract the release zip to the drive again"
 fi
-[ -n "$expected" ] && [ "$actual" = "$expected" ] || die "checksum mismatch for $PKG_NAME"
 
 COMMIT=$(sed -n 's/.*"commit": *"\([0-9a-f]\{7,40\}\)".*/\1/p' "$MANIFEST" | head -n 1)
 [ -n "$COMMIT" ] || die "could not read repository.commit from $MANIFEST"
@@ -105,6 +134,8 @@ extract "$CONTROL" "$WORK/control" || die "could not extract $CONTROL"
 cd "$WORK/control"
 if [ -f md5sum.list ]; then
     md5sum -c md5sum.list || die "control package files failed checksum verification"
+elif [ "$IGNORE_SUM" = 1 ]; then
+    die "the package has no md5sum.list to check its files against; not flashing it"
 fi
 chmod a+x IAPCommand ISPCommand 2>/dev/null || true
 

@@ -161,6 +161,11 @@ the detected package; demo installs default to 2.0.7. In the SDL demo,
   and `control` version folders (the stock startup runs the newest). Kernel
   folders stay. They go to the backup drive even with "Install without
   backup", and Restore backup puts them back.
+- **Flash anyway**: when the MCU firmware package fails its sha256 (damaged copy
+  on the drive, or no working sha256 tool), the error page offers Flash anyway.
+  It runs the install again and flashes the package only if every file inside
+  matches its `md5sum.list`; otherwise it stops with nothing flashed. MCU
+  flashing is never skipped.
 - **Old Moonraker environments**: a first install archives any old Moonraker
   venv in `/usr/prog/moonraker` into the backup (`old-moonraker-envs/`), removes
   it, and restores it if the Moonraker step fails.

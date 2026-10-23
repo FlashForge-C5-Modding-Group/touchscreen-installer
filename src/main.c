@@ -85,6 +85,10 @@ static bool installed_same, update_configs;
  * "Update available", which reinstalls with the recorded setup. */
 static bool update_available;
 static bool space_low;
+/* The MCU package on the drive failed its checksum (MCUFORCE); the error
+ * page offers to install again and flash it anyway (force_mcu), checked
+ * against the md5sum.list inside it instead. */
+static bool mcu_forceable, force_mcu;
 /* FlashForge firmware version; Tunneled needs 1.9.9 or newer. */
 static char ff_version[32] = "unknown";
 static bool tunnel_blocked;
@@ -314,6 +318,9 @@ static void start_action(const char *action)
     }
     if (demo_root) setenv("OC_DEMO_ROOT", demo_root, 1);
     else unsetenv("OC_DEMO_ROOT");
+    if (force_mcu) setenv("OC_IGNORE_MCU_CHECKSUM", "1", 1);
+    else unsetenv("OC_IGNORE_MCU_CHECKSUM");
+    force_mcu = mcu_forceable = false;
     pid_t pid = fork();
     if (pid == 0) {
         close(fds[0]);
@@ -461,6 +468,9 @@ static void action_button(lv_event_t *event)
         demo_root = NULL; unsetenv("OC_SKIP_BACKUP"); start_action("install");
     } else if (strcmp(action, "install-nobackup") == 0) {
         demo_root = NULL; setenv("OC_SKIP_BACKUP", "1", 1); start_action("install");
+    } else if (strcmp(action, "install-force-mcu") == 0) {
+        /* Same choices and backup setting as the run that stopped. */
+        force_mcu = true; start_action("install");
     } else if (strcmp(action, "demo-install") == 0) {
         demo_root = OC_DEMO_INSTALL_ROOT; unsetenv("OC_SKIP_BACKUP"); start_action("install");
     } else if (strcmp(action, "update") == 0 || strcmp(action, "update-nobackup") == 0) {
@@ -944,6 +954,15 @@ static void show_page(enum page next)
     case PAGE_ERROR:
         set_title(next, restoring ? "Restore stopped"
                         : rolling_back ? "Rollback stopped" : "Installation stopped");
+        if (mcu_forceable && strcmp(current_action, "install") == 0) {
+            lv_label_set_text(body_label, "The MCU firmware package on the USB drive failed its checksum, so "
+                              "nothing was flashed. Flash anyway checks every firmware file inside the "
+                              "package and stops if any is damaged. Otherwise extract the release to "
+                              "the drive again and start over.");
+            add_button("Start over", "restart");
+            add_button("Flash anyway", "install-force-mcu");
+            break;
+        }
         lv_label_set_text(body_label, "No later stages were run. Open the log for details and check the backup before retrying.");
         add_button("Start over", "restart");
         if (backup_found[0] && strcmp(current_action, "install") == 0 && !demo_root)
@@ -1032,6 +1051,8 @@ static void process_line(char *line)
         snprintf(ff_version, sizeof(ff_version), "%.30s", line + 9);
         tunnel_blocked = sscanf(ff_version, "%d.%d.%d", &a, &b, &c) >= 2 &&
                          a * 1000000 + b * 1000 + c < 1009009;
+    } else if (strcmp(line, "MCUFORCE") == 0) {
+        mcu_forceable = true;
     } else if (strncmp(line, "SPACE LOW ", 10) == 0) {
         space_low = true;
         space_mb = atoi(line + 10);
