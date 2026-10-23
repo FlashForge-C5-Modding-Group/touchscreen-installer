@@ -220,7 +220,15 @@ flash_iap HEATERBOARD_M3 heaterBoard.hex /dev/ttyS4
 flash_iap LEVELBOARD_M3 levelBoard.hex /dev/ttyS7
 flash_isp GD_M3 mainBoardGD.hex
 
-[ "$FAILED" -eq 0 ] || die "one or more MCUs failed to flash; firmware not marked as installed"
+# A failed flash leaves a copy of the printer's logs on the USB drive.
+save_logs() {
+    [ -z "$DEMO_ROOT" ] || return 0
+    dest="$(dirname "$OC_PAYLOAD")/logs/mcu-flash-$(date +%Y%m%d-%H%M%S 2>/dev/null || echo failed)"
+    mkdir -p "$dest" && cp -r "$LOG_DIR/." "$dest/" 2>/dev/null && sync &&
+        echo "STAGE Logs copied to the USB drive: opencreator/logs/${dest##*/}" ||
+        echo "WARN Could not copy the logs to the USB drive"
+}
+[ "$FAILED" -eq 0 ] || { save_logs; die "one or more MCUs failed to flash; firmware not marked as installed"; }
 
 mkdir -p "$(dirname "$MARKER")"
 printf '%s

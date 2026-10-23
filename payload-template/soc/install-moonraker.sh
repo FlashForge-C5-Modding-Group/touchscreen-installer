@@ -95,7 +95,8 @@ fi
 if git -C "$MR/moonraker" remote get-url origin 2>/dev/null | grep -q Arksine; then
     echo "STAGE Updating Moonraker in place"
     OLD_HEAD=$(git -C "$MR/moonraker" rev-parse HEAD) || die "cannot read the Moonraker checkout"
-    git -C "$MR/moonraker" fetch --depth 1 origin || die "cannot download Moonraker"
+    # HEAD: the default branch, even if this copy was cloned pinned to an old branch or tag
+    git -C "$MR/moonraker" fetch --depth 1 origin HEAD || die "cannot download Moonraker"
     git -C "$MR/moonraker" reset -q --hard FETCH_HEAD || die "cannot update Moonraker"
 else
     echo "STAGE Downloading Moonraker"

@@ -23,7 +23,7 @@ if [ -n "$DEMO_ROOT" ]; then
     : > "$TL/klipper_macro/timelapse.cfg"
 elif [ -d "$TL/.git" ]; then
     echo "STAGE Updating moonraker-timelapse"
-    git -C "$TL" fetch --depth 1 origin || die "cannot download moonraker-timelapse"
+    git -C "$TL" fetch --depth 1 origin HEAD || die "cannot download moonraker-timelapse"
     git -C "$TL" reset -q --hard FETCH_HEAD || die "cannot update moonraker-timelapse"
 else
     oc_git_clone_shallow "$TIMELAPSE_REPO" "$TL" || die "cannot download moonraker-timelapse"

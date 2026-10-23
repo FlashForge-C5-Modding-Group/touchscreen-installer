@@ -58,6 +58,8 @@ Both modes start with:
    with Kalico's `scripts/build_c5_update.py all` (one `--template`/`--output`
    pair per model; it needs `C5_UPDATE_PASSPHRASE`) and add them with
    `MCU_PACKAGE="Creator5Pro-....tgz Creator5-....tgz" make usb`.
+   If a board fails to flash, `/usr/data/logs/` is copied to the drive as
+   `opencreator/logs/mcu-flash-<date>-<time>/`.
 4. **Camera firmware** (`96-flash-camera-firmware.sh`): FlashForge's camera
    firmware 1226 from their 2.0.0 update, which they ship but don't flash yet.
    Only a camera reporting an older version (USB `05a3:9230`) is flashed, with
