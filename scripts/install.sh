@@ -32,8 +32,8 @@ if [ -z "$DEMO_ROOT" ]; then
 fi
 STATE_DIR=${OC_STATE_DIR:-"$DEMO_ROOT/usr/data/opencreator"}
 INSTALL_STATE=$STATE_DIR/install.json
-INSTALLER_VERSION=0.0.1
-INSTALLER_RELEASE="Public Alpha Version 1"
+INSTALLER_VERSION=0.0.1.1
+INSTALLER_RELEASE="Public Alpha 1 Fix 1"
 MIN_FREE_KB=${OC_MIN_FREE_KB:-262144}
 BACKUP_FOLDERS="usr/prog/PROGRAM/software/firmwareExe usr/prog/moonraker usr/data/opencreator
 usr/data/mainsail usr/data/fluidd usr/data/nginx usr/prog/c5-tunnel-socat
@@ -237,6 +237,26 @@ foreign_folders() {
         [ ! -e "$dir" ] || echo "${dir#"$DEMO_ROOT"/}"
     done
 }
+# Old FlashForge versions in /usr/prog/PROGRAM, one per line: leftover
+# update archives (*.tar.xz), and every version folder of software, library
+# and control but the newest, which is the one the stock startup runs.
+# Kernel folders stay; the installer reads the kernel package from them.
+old_ff_versions() {
+    for kind in kernel library software control; do
+        dir=$DEMO_ROOT/usr/prog/PROGRAM/$kind
+        for f in "$dir"/*.tar.xz; do
+            [ ! -f "$f" ] || echo "${f#"$DEMO_ROOT"/}"
+        done
+        [ "$kind" != kernel ] || continue
+        newest=$(for d in "$dir"/[0-9]*/; do [ -d "$d" ] && basename "$d"; done |
+            sort -t. -k1,1n -k2,2n -k3,3n | tail -n 1)
+        for d in "$dir"/[0-9]*/; do
+            [ -d "$d" ] && [ "$(basename "$d")" != "$newest" ] || continue
+            d=${d%/}
+            echo "${d#"$DEMO_ROOT"/}"
+        done
+    done
+}
 # Free KB on /usr/data, counting what removing ZMod/Reforge frees up.
 usable_kb() {
     data_dir=$DEMO_ROOT/usr/data
@@ -256,6 +276,10 @@ space_ok() {
     [ "$usable" -ge "$NEW_INSTALL_MIN_KB" ]
 }
 remove_foreign() {
+    for old in $(old_ff_versions); do
+        stage "Removing the old FlashForge version /$old"
+        rm -rf "${DEMO_ROOT:?}/$old" || die "could not remove /$old"
+    done
     for folder in $(foreign_folders); do
         case $folder in
             usr/prog/moonraker/*) stage "Removing the old Moonraker copy /$folder" ;;
@@ -365,7 +389,7 @@ backup_folders() {
     mkdir "$target" || die "cannot create backup directory"
     : > "$target/absent.list"
     # Old Moonraker copies are already inside the usr/prog/moonraker archive.
-    for folder in ${1:-$BACKUP_FOLDERS $(foreign_folders | grep -v '^usr/prog/moonraker/')}; do
+    for folder in ${1:-$BACKUP_FOLDERS $(foreign_folders | grep -v '^usr/prog/moonraker/') $(old_ff_versions)}; do
         if [ -e "$DEMO_ROOT/$folder" ]; then
             name=$(printf '%s' "$folder" | tr / _)
             stage "Backing up /$folder"
@@ -420,10 +444,10 @@ install_payload() {
     progress 0 "$total"
     if [ "${OC_SKIP_BACKUP:-0}" = 1 ]; then
         stage "Skipping the backup (Install without backup)"
-        # ZMod/Reforge and old Moonraker copies are still archived before
-        # they are removed.
-        foreign=$(foreign_folders)
-        [ -z "$foreign" ] || backup_folders "$foreign"
+        # ZMod/Reforge, old Moonraker copies and old FlashForge versions are
+        # still archived before they are removed.
+        foreign="$(foreign_folders) $(old_ff_versions)"
+        [ -z "${foreign# }" ] || backup_folders "$foreign"
         # Payload steps still keep small "previous" copies here.
         BACKUP_TARGET=$STATE_DIR/no-backup
         mkdir -p "$BACKUP_TARGET"
@@ -491,6 +515,13 @@ restore_backup() {
             rm -rf "$DEMO_ROOT/$folder"
         fi
         progress "$n" "$total"
+    done
+    # Old FlashForge versions the install removed (archives rooted at /)
+    for archive in "$LATEST_BACKUP"/usr_prog_PROGRAM_*.tar*; do
+        [ -f "$archive" ] || continue
+        case "${archive##*/}" in usr_prog_PROGRAM_software_firmwareExe.tar*) continue ;; esac
+        stage "Restoring ${archive##*/}"
+        unpack "$archive" | tar -C "${DEMO_ROOT:-/}" -xf - || die "restore failed: ${archive##*/}"
     done
     rm -f "$INSTALL_STATE"
     sync

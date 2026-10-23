@@ -20,6 +20,23 @@ if [ -z "$DEMO_ROOT" ] && [ -x /usr/prog/klipper/moonrakerDaemon ]; then
     /usr/prog/klipper/moonrakerDaemon stop >/dev/null 2>&1 || true
 fi
 
+# Old environments a first install removes are archived first; this file
+# points at the archive until the install finishes.
+ENV_PENDING=$DEMO_ROOT/usr/data/opencreator/.moonraker-envs-pending
+restore_envs() {
+    [ -f "$ENV_PENDING" ] || return 0
+    arch=$(cat "$ENV_PENDING")
+    for tgz in "$arch"/*.tar.gz; do
+        [ -f "$tgz" ] || continue
+        name=${tgz##*/}
+        name=${name%.tar.gz}
+        echo "STAGE Restoring the old Moonraker environment $name"
+        rm -rf "$MR/$name"
+        gunzip -c "$tgz" | tar -C "$MR" -xf - || echo "WARN could not restore $name from $tgz"
+    done
+    rm -f "$ENV_PENDING"
+}
+
 # A previous run that was interrupted (power loss) left the original aside.
 for dir in moonraker moonraker-env; do
     if [ -d "$MR/$dir.old" ]; then
@@ -28,6 +45,7 @@ for dir in moonraker moonraker-env; do
         mv "$MR/$dir.old" "$MR/$dir"
     fi
 done
+restore_envs
 rm -rf "$MR/moonraker.new"
 
 # Arksine's Moonraker is updated in place (untracked files stay) and reset to
@@ -42,10 +60,37 @@ rollback() {
             mv "$MR/$dir.old" "$MR/$dir"
         fi
     done
+    restore_envs
     [ -z "$OLD_HEAD" ] || git -C "$MR/moonraker" reset -q --hard "$OLD_HEAD" || true
 }
 trap 'rc=$?; oc_swap_off; [ $rc -eq 0 ] || rollback' EXIT
 rm -rf "$MR/moonraker.old" "$MR/moonraker-env.old"
+
+# First install: old Moonraker environments (FlashForge's soft-float one, or
+# copies other mods left) are archived into the backup and removed, not set
+# aside; /usr/prog has no room for two. A failed install restores them.
+ENV_ARCHIVE=$OC_BACKUP/old-moonraker-envs
+if [ "${OC_UPDATE:-0}" = 0 ]; then
+    for env in "$MR"/*; do
+        [ -f "$env/pyvenv.cfg" ] || [ -f "$env/bin/activate" ] || continue
+        if [ "$env" = "$MR/moonraker-env" ] &&
+            grep -qx "home = /usr/data/python-hf/bin" "$env/pyvenv.cfg" 2>/dev/null; then
+            continue
+        fi
+        name=${env##*/}
+        echo "STAGE Backing up the old Moonraker environment $name"
+        mkdir -p "$ENV_ARCHIVE" "$(dirname "$ENV_PENDING")"
+        tar -C "$MR" -cf - "$name" | gzip > "$ENV_ARCHIVE/$name.tar.gz.tmp" &&
+            gunzip -t "$ENV_ARCHIVE/$name.tar.gz.tmp" &&
+            mv "$ENV_ARCHIVE/$name.tar.gz.tmp" "$ENV_ARCHIVE/$name.tar.gz" || {
+            rm -f "$ENV_ARCHIVE/$name.tar.gz.tmp"
+            die "could not back up $name to $ENV_ARCHIVE (out of space?)"
+        }
+        echo "$ENV_ARCHIVE" > "$ENV_PENDING"
+        echo "STAGE Removing the old Moonraker environment $name"
+        rm -rf "$env" || die "could not remove $name"
+    done
+fi
 
 if git -C "$MR/moonraker" remote get-url origin 2>/dev/null | grep -q Arksine; then
     echo "STAGE Updating Moonraker in place"
@@ -95,6 +140,9 @@ else
     git -C "$MR/moonraker" config core.fileMode false
 fi
 rm -rf "$MR/moonraker.old" "$MR/moonraker-env.old"
+# Installed: a "no backup" copy goes to free its space, a real backup stays.
+rm -f "$ENV_PENDING"
+case "$OC_BACKUP" in */no-backup) rm -rf "$ENV_ARCHIVE" ;; esac
 trap - EXIT
 oc_swap_off
 sync

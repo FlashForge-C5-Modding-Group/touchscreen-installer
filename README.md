@@ -155,6 +155,15 @@ the detected package; demo installs default to 2.0.7. In the SDL demo,
 - **Preflight warnings**: `check` warns about less than 256 MB free on
   `/usr/data` or the backup drive (`OC_MIN_FREE_KB` overrides the threshold),
   a missing or read-only backup destination, and missing installer scripts.
+- **Old FlashForge versions**: `/usr/prog` is under 1 GB, so every install
+  backs up and then removes FlashForge's leftover update archives
+  (`/usr/prog/PROGRAM/*/*.tar.xz`) and all but the newest `software`, `library`
+  and `control` version folders (the stock startup runs the newest). Kernel
+  folders stay. They go to the backup drive even with "Install without
+  backup", and Restore backup puts them back.
+- **Old Moonraker environments**: a first install archives any old Moonraker
+  venv in `/usr/prog/moonraker` into the backup (`old-moonraker-envs/`), removes
+  it, and restores it if the Moonraker step fails.
 - **Progress bar and elapsed time** while installing or restoring.
 - **Log viewer**: the Log button (top right) shows all backend output. The
   same output is appended, timestamped, to `BACKUP_DIR/opencreator-installer.log`
