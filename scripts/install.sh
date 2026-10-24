@@ -32,8 +32,8 @@ if [ -z "$DEMO_ROOT" ]; then
 fi
 STATE_DIR=${OC_STATE_DIR:-"$DEMO_ROOT/usr/data/opencreator"}
 INSTALL_STATE=$STATE_DIR/install.json
-INSTALLER_VERSION=0.0.3
-INSTALLER_RELEASE="Public Alpha 3"
+INSTALLER_VERSION=0.0.4
+INSTALLER_RELEASE="Public Alpha 4"
 MIN_FREE_KB=${OC_MIN_FREE_KB:-262144}
 BACKUP_FOLDERS="usr/prog/PROGRAM/software/firmwareExe usr/prog/moonraker usr/data/opencreator
 usr/data/mainsail usr/data/fluidd usr/data/nginx usr/prog/c5-tunnel-socat
@@ -669,9 +669,49 @@ rollback_stock() {
     stage "Rolled back to stock; reboot to start FlashForge's firmware"
 }
 
+# Frees space: print files, timelapse videos and logs, other mods' leftovers,
+# docs and man pages, caches and FlashForge update downloads. Git checkouts
+# and the stock firmware's own model files are kept.
+CLEANUP_FOLDERS="usr/data/anvil usr/data/anvil-data usr/data/anvil-timelapse usr/data/zmod
+usr/data/.mod/.zmod usr/prog/klipper/docs usr/prog/openssl-1.0.2d/man
+usr/prog/ffmpeg-4.0.2/share/man usr/prog/libzip-1.10.1/share/man"
+CLEANUP_EMPTY="usr/data/bin/opt/var/cache opt/var/cache usr/data/logs usr/data/update
+usr/data/opencreator/timelapse usr/data/opencreator/klipper/logs"
+cleanup_storage() {
+    [ -n "$DEMO_ROOT" ] || [ "$(id -u)" -eq 0 ] || die "cleanup requires root"
+    before=$(free_kb "$DEMO_ROOT/usr/data")
+    progress 0 3
+    stage "Removing print files, videos and logs"
+    set -- -path "$DEMO_ROOT/usr/prog/PROGRAM/library"
+    for git in $(find "$DEMO_ROOT/usr/data" "$DEMO_ROOT/usr/prog" -name .git 2>/dev/null); do
+        set -- "$@" -o -path "${git%/.git}"
+    done
+    find "$DEMO_ROOT/usr/data" "$DEMO_ROOT/usr/prog" \( "$@" \) -prune -o -type f \
+        \( -name '*.gcode' -o -name '*.3mf' -o -name '*.stl' -o -name '*.mp4' -o -name '*.log' \) \
+        ! -name opencreator-installer.log -print -exec rm -f {} + 2>/dev/null || true
+    progress 1 3
+    stage "Removing other mods' leftovers, old Moonraker copies, docs and man pages"
+    for d in $CLEANUP_FOLDERS "$DEMO_ROOT"/usr/prog/moonraker/moonraker-old* \
+        "$DEMO_ROOT"/usr/prog/moonraker/moonraker-env-old*; do
+        case $d in /*) ;; *) d=$DEMO_ROOT/$d ;; esac
+        [ ! -e "$d" ] || { echo "$d"; rm -rf "$d"; }
+    done
+    progress 2 3
+    stage "Emptying caches, logs and FlashForge update downloads"
+    for d in $CLEANUP_EMPTY; do
+        [ ! -d "$DEMO_ROOT/$d" ] || find "$DEMO_ROOT/$d" -type f ! -name opencreator-installer.log \
+            -print -exec rm -f {} + 2>/dev/null || true
+    done
+    sync
+    progress 3 3
+    after=$(free_kb "$DEMO_ROOT/usr/data")
+    stage "Cleanup complete: $(( (after - before) / 1024 )) MB freed, $(( after / 1024 )) MB free"
+}
+
 case "$ACTION" in
     check) check ;;
     rollback) rollback_stock ;;
+    cleanup) cleanup_storage ;;
     install) require_online; install_payload ;;
     reconfigure) require_online; reconfigure ;;
     wifi-scan) wifi_scan ;;

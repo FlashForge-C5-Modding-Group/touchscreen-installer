@@ -17,8 +17,9 @@
 enum page { PAGE_CHECK, PAGE_MODE, PAGE_WEB, PAGE_TOUCHSCREEN, PAGE_READY,
             PAGE_RUNNING, PAGE_DONE, PAGE_ERROR, PAGE_RESTORE, PAGE_KERNEL,
             PAGE_INSTALLED, PAGE_ROLLBACK, PAGE_UPDATE, PAGE_OFFLINE, PAGE_WIFI_PASS,
-            PAGE_TUNNEL_PASS };
+            PAGE_TUNNEL_PASS, PAGE_CLEANUP };
 static enum page page_now;
+static enum page cleanup_from;  /* the page Clean up storage was opened from */
 static const char *payload_path, *backup_path, *script_path;
 static const char *mode = "soc", *web = "fluidd";
 static const char *touchscreen = "yes";
@@ -140,6 +141,7 @@ static const char *page_icon(enum page p)
     case PAGE_READY: return LV_SYMBOL_PLAY;
     case PAGE_RESTORE:
     case PAGE_ROLLBACK: return LV_SYMBOL_LOOP;
+    case PAGE_CLEANUP: return LV_SYMBOL_TRASH;
     case PAGE_UPDATE: return LV_SYMBOL_UPLOAD;
     case PAGE_OFFLINE:
     case PAGE_WIFI_PASS: return LV_SYMBOL_WIFI;
@@ -494,6 +496,9 @@ static void action_button(lv_event_t *event)
     else if (strcmp(action, "restore-confirm") == 0) show_page(PAGE_RESTORE);
     else if (strcmp(action, "rollback-confirm") == 0) show_page(PAGE_ROLLBACK);
     else if (strcmp(action, "rollback") == 0) { demo_root = NULL; start_action("rollback"); }
+    else if (strcmp(action, "cleanup-confirm") == 0) { cleanup_from = page_now; show_page(PAGE_CLEANUP); }
+    else if (strcmp(action, "cleanup-back") == 0) show_page(cleanup_from);
+    else if (strcmp(action, "cleanup") == 0) { demo_root = NULL; start_action("cleanup"); }
     else if (strcmp(action, "wifi-rescan") == 0) { if (child_pid < 0) start_action("wifi-scan"); show_page(PAGE_OFFLINE); }
     else if (strcmp(action, "wifi-back") == 0) show_page(PAGE_OFFLINE);
     else if (strcmp(action, "wifi-open") == 0) {
@@ -569,6 +574,11 @@ static void add_summary_row(const char *label, const char *value)
     lv_obj_set_style_pad_bottom(row, 6, 0);
 }
 
+static void add_cleanup_button(void)
+{
+    add_button(LV_SYMBOL_TRASH "  Clean up storage", "cleanup-confirm");
+}
+
 static void show_page(enum page next)
 {
     page_now = next;
@@ -617,6 +627,7 @@ static void show_page(enum page next)
     bool restoring = strcmp(current_action, "restore") == 0;
     bool reconfiguring = strcmp(current_action, "reconfigure") == 0;
     bool rolling_back = strcmp(current_action, "rollback") == 0;
+    bool cleaning = strcmp(current_action, "cleanup") == 0;
 
     switch (next) {
     case PAGE_CHECK:
@@ -636,6 +647,7 @@ static void show_page(enum page next)
             lv_label_set_text(body_label, buf);
         }
         add_button("Check again", "restart");
+        add_cleanup_button();
         break;
     case PAGE_OFFLINE:
         /* Also the Wi-Fi page while online (header Wi-Fi button). */
@@ -673,6 +685,7 @@ static void show_page(enum page next)
         }
         if (online) add_button("Back", "start");
         add_button(LV_SYMBOL_REFRESH "  Scan again", "wifi-rescan");
+        add_cleanup_button();
         break;
     case PAGE_WIFI_PASS:
         {
@@ -731,6 +744,7 @@ static void show_page(enum page next)
                 disable_button(update);
             }
             if (stock_found[0]) add_button(LV_SYMBOL_REFRESH "  Rollback to stock", "rollback-confirm");
+            add_cleanup_button();
         }
         break;
     case PAGE_INSTALLED:
@@ -756,6 +770,7 @@ static void show_page(enum page next)
         }
         if (backup_found[0]) add_button(LV_SYMBOL_LOOP "  Restore backup", "restore-confirm");
         if (stock_found[0]) add_button(LV_SYMBOL_REFRESH "  Rollback to stock", "rollback-confirm");
+        add_cleanup_button();
         break;
     case PAGE_MODE:
         set_title(next, "Where should Klipper run?");
@@ -786,6 +801,7 @@ static void show_page(enum page next)
             add_button(LV_SYMBOL_LOOP "  Restore backup", "restore-confirm");
         if (stock_found[0] && !installed_same)
             add_button(LV_SYMBOL_REFRESH "  Rollback to stock", "rollback-confirm");
+        add_cleanup_button();
         break;
     case PAGE_WEB:
         set_title(next, "Choose web interface");
@@ -871,6 +887,7 @@ static void show_page(enum page next)
                      "needs 2 GB. Free up space on /usr/data, then check again.", space_mb);
             lv_label_set_text(body_label, buf);
             add_button("Check again", "restart");
+            add_cleanup_button();
             break;
         }
 #ifndef OC_DEMO
@@ -905,15 +922,27 @@ static void show_page(enum page next)
         add_button("Back", "start");
         add_button("Roll back now", "rollback");
         break;
+    case PAGE_CLEANUP:
+        set_title(next, "Clean up storage?");
+        lv_label_set_text(body_label,
+            "Deletes every print file (.gcode, .3mf, .stl), timelapse video and frame, and log, "
+            "leftovers of other mods (ZMOD, Anvil), old Moonraker copies, docs and man "
+            "pages, caches and FlashForge update downloads. Git checkouts and the "
+            "installer's backups are kept. This can't be undone.");
+        add_button("Back", "cleanup-back");
+        add_button(LV_SYMBOL_TRASH "  Clean up now", "cleanup");
+        break;
     case PAGE_RUNNING:
         set_title(next, restoring ? "Restoring backup"
                         : rolling_back ? "Rolling back to stock"
+                        : cleaning ? "Cleaning up storage"
                         : reconfiguring ? "Applying changes"
                         : demo_root ? "Demo installing" : "Installing");
         lv_label_set_text(body_label, demo_root
             ? "Follow the live status below. Writing to " OC_DEMO_INSTALL_ROOT
               ", not the real system -- safe to power off."
             : rolling_back ? "Putting FlashForge's firmwareExe back. Do not power off."
+            : cleaning ? "Deleting files. Do not power off."
             : reconfiguring
             ? "Follow the live status below and do not power off. Anything the new "
               "setup needs that is not on the printer yet is downloaded first."
@@ -924,6 +953,13 @@ static void show_page(enum page next)
         lv_obj_clear_flag(progress_bar, LV_OBJ_FLAG_HIDDEN);
         break;
     case PAGE_DONE:
+        if (cleaning) {
+            set_title(next, "Storage cleaned up");
+            lv_label_set_text(body_label, "The freed space is shown below. Continue to check "
+                              "the printer again and carry on.");
+            add_button("Continue", "restart");
+            break;
+        }
         if (restoring) {
             set_title(next, "Restore complete");
             lv_label_set_text(body_label, "The backed-up folders are back in place. Reboot to start the restored stack.");
@@ -953,7 +989,8 @@ static void show_page(enum page next)
         break;
     case PAGE_ERROR:
         set_title(next, restoring ? "Restore stopped"
-                        : rolling_back ? "Rollback stopped" : "Installation stopped");
+                        : rolling_back ? "Rollback stopped"
+                        : cleaning ? "Cleanup stopped" : "Installation stopped");
         if (mcu_forceable && strcmp(current_action, "install") == 0) {
             lv_label_set_text(body_label, "The MCU firmware package on the USB drive failed its checksum, so "
                               "nothing was flashed. Flash anyway checks every firmware file inside the "
