@@ -371,6 +371,16 @@ root changes: without the script, the next boot runs the stock dropbear.
 SFTP is optional, so a problem here is a warning on the installer screen,
 not a failed install.
 
+## Filament dryer
+
+`88-detect-dryer.sh` (SoC only) sends `M16` to FlashForge's VDS filament dryer on
+`/dev/ttyS3` at 115200 baud, twice if needed. If it answers (`M16 ok. V…`, or
+`Boot` from its bootloader), the step writes
+`config/printer.accessory.dryer.cfg`, which includes opencreator-fs's
+`printer.dryer.cfg`; `printer.base.cfg` loads `printer.accessory.*.cfg`, so
+without a dryer nothing about it is loaded. A file from an earlier install is
+kept when the dryer doesn't answer this time. Demo runs skip the check.
+
 ## Root login
 
 `85-enable-root.sh` adds the root login `opencreator` with the password
