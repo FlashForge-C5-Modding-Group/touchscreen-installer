@@ -4,7 +4,7 @@
 # packages the chosen mode needs.
 set -eu
 : "${OC_MODE:?}"
-: "${OC_NAN_ADDR:?}"
+: "${OC_NAN_ADDR?}" # empty on machines with no legacy-NaN switch (AD5X)
 DEMO_ROOT=${OC_DEMO_ROOT:-}
 : "${OC_PAYLOAD:?}"
 . "$OC_PAYLOAD/common/install-helpers.sh"
@@ -64,8 +64,10 @@ fi
 echo "STAGE Setting the clock"
 rdate -s time.nist.gov 2>/dev/null || echo "STAGE Clock not set (no time server); continuing"
 
-echo "STAGE Enabling legacy NaN"
-busybox devmem "$OC_NAN_ADDR" 8 1
+if [ -n "$OC_NAN_ADDR" ]; then
+    echo "STAGE Enabling legacy NaN"
+    busybox devmem "$OC_NAN_ADDR" 8 1
+fi
 
 if [ -x /opt/bin/opkg ]; then
     echo "STAGE Entware already installed"

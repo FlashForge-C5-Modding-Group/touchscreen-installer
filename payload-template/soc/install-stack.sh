@@ -11,8 +11,14 @@ DEMO_ROOT=${OC_DEMO_ROOT:-}
 
 OC=$DEMO_ROOT/usr/data/opencreator/klipper
 PYHF=$DEMO_ROOT/usr/data/python-hf
-KALICO_REPO=${OC_KALICO_REPO:-https://github.com/FlashForge-C5-Modding-Group/kalico.git}
-KALICO_BRANCH=${OC_KALICO_BRANCH:-something}
+# The AD5X runs its own Kalico fork (N32G45x boards, half-duplex RS485 IFS)
+if [ "${OC_MACHINE:-}" = AD5X ]; then
+    KALICO_REPO=${OC_KALICO_REPO:-https://github.com/FlashForge-C5-Modding-Group/kalico-ad5x.git}
+    KALICO_BRANCH=${OC_KALICO_BRANCH:-main}
+else
+    KALICO_REPO=${OC_KALICO_REPO:-https://github.com/FlashForge-C5-Modding-Group/kalico.git}
+    KALICO_BRANCH=${OC_KALICO_BRANCH:-something}
+fi
 OPENCREATOR_FS_REPO=${OC_FS_REPO:-https://github.com/FlashForge-C5-Modding-Group/opencreator-fs.git}
 
 die() { echo "ERROR $*"; exit 1; }
@@ -103,6 +109,7 @@ oc_swap_off
 
 echo "STAGE Installing the OpenCreator printer config"
 TEMPLATE=$WORK/opencreator-fs/fs/usr/data/config
+[ "${OC_MACHINE:-}" != AD5X ] || TEMPLATE=$WORK/opencreator-fs/fs/usr/data/config-ad5x
 mkdir -p "$OC/config" "$OC/logs"
 (cd "$TEMPLATE" && find . -type d) | while IFS= read -r dir; do
     mkdir -p "$OC/config/$dir"

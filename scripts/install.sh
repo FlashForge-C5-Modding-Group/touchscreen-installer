@@ -51,7 +51,7 @@ warn() { printf 'WARN %s\n' "$*"; }
 progress() { printf 'PROGRESS %s %s\n' "$1" "$2"; }
 die() { printf 'ERROR %s\n' "$*"; exit 1; }
 # Sets MACHINE/PID from the stock boot script, which declares exactly
-# one of the two supported pairs. OC_MACHINE/OC_PID override it.
+# one of the supported pairs. OC_MACHINE/OC_PID override it.
 detect_model() {
     MACHINE=${OC_MACHINE:-}
     PID=${OC_PID:-}
@@ -68,7 +68,7 @@ detect_model() {
         PID=0029
     fi
     case "$MACHINE:$PID" in
-        Creator5Pro:0029|Creator5:0028) return 0 ;;
+        Creator5Pro:0029|Creator5:0028|AD5X:0026) return 0 ;;
     esac
     MACHINE=unknown
     PID=unknown
@@ -79,7 +79,20 @@ detect_model() {
 # overrides it, and demo installs default to 2.0.7 (FlashForge 1.9.9).
 kernel_supported() {
     KERNEL_PACKAGE=${OC_KERNEL_PACKAGE:-$(ls "$DEMO_ROOT/usr/prog/PROGRAM/kernel/" 2>/dev/null | head -n 1)}
-    if [ -z "$KERNEL_PACKAGE" ] && [ -n "$DEMO_ROOT" ]; then KERNEL_PACKAGE=2.0.7; fi
+    if [ -z "$KERNEL_PACKAGE" ] && [ -n "$DEMO_ROOT" ]; then
+        KERNEL_PACKAGE=2.0.7
+        [ "${MACHINE:-}" = AD5X ] && KERNEL_PACKAGE=2.0.1
+    fi
+    # The AD5X's X2600 kernel only runs NaN2008 binaries and its userland is
+    # built that way; there is no legacy-NaN switch to poke (its 2.0.1 is not
+    # the C5 2.0.1 kernel, so the C5 address must never be used on it)
+    if [ "${MACHINE:-}" = AD5X ]; then
+        NAN_ADDR=
+        case "$KERNEL_PACKAGE" in
+            2.0.1) return 0 ;;
+            *) KERNEL_PACKAGE=${KERNEL_PACKAGE:-unknown}; return 1 ;;
+        esac
+    fi
     case "$KERNEL_PACKAGE" in
         2.0.1|2.0.2|2.0.3|2.0.4|2.0.5|2.0.6) NAN_ADDR=0x00a130d1 ;;
         2.0.7) NAN_ADDR=0x00B330D1 ;;

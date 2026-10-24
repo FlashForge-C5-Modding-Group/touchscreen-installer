@@ -104,6 +104,33 @@ elif [ "$actual" != "$expected" ]; then
     die "checksum mismatch for $PKG_NAME: the file on the USB drive is damaged; extract the release zip to the drive again"
 fi
 
+# AD5X packages (ad5x-update-creator) are stock-format: FlashForge's own
+# app_startup.sh installs the control part at the next power-on and flashes
+# the three boards on the power-on after that, in the eboard's bootloader
+# window. Stage the package and let the installer's final reboot be the
+# first of the two power cycles.
+if [ "$OC_MACHINE" = AD5X ]; then
+    VER=$(sed -n 's/.*"kalico_version": *"\([0-9a-f]\{7,40\}\)".*/\1/p' "$MANIFEST" | head -n 1)
+    [ -n "$VER" ] || die "could not read kalico_version from $MANIFEST"
+    reported=$(curl -s -m 5 "http://127.0.0.1:7125/printer/objects/query?mcu=mcu_version&mcu%20eboard=mcu_version&mcu%20ifs=mcu_version" 2>/dev/null |
+        grep -o '"mcu_version": *"[^"]*"' | sed 's/.*"\([^"]*\)"$/\1/')
+    if [ -z "$DEMO_ROOT" ] && [ "$(printf '%s\n' "$reported" | grep -c .)" -eq 3 ] &&
+        [ "$(printf '%s\n' "$reported" | grep -c -- "-g$VER")" -eq 3 ]; then
+        echo "STAGE All three boards report $VER, skipping"
+        exit 0
+    fi
+    mkdir -p "$DEMO_ROOT/usr/data"
+    cp "$PKG" "$DEMO_ROOT/usr/data/" || die "cannot stage $PKG_NAME in /usr/data"
+    sync
+    if [ -n "$DEMO_ROOT" ]; then
+        echo "STAGE Demo mode: staged $PKG_NAME for FlashForge's updater"
+        exit 0
+    fi
+    echo "STAGE $PKG_NAME staged in /usr/data: FlashForge's updater installs it at the next"
+    echo "STAGE power-on and flashes the boards on the power-on after that (two power cycles)"
+    exit 0
+fi
+
 COMMIT=$(sed -n 's/.*"commit": *"\([0-9a-f]\{7,40\}\)".*/\1/p' "$MANIFEST" | head -n 1)
 [ -n "$COMMIT" ] || die "could not read repository.commit from $MANIFEST"
 

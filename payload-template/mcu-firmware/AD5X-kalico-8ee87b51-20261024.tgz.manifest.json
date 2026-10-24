@@ -1,0 +1,10 @@
+{
+  "machine": "AD5X",
+  "kalico_version": "8ee87b51",
+  "control_version": "1.1.1",
+  "firmware_sha256": {
+    "AD5X-mainboard.bin": "de023cf84d7064af64312198c5e08accb859a874f6830cb02fe1f6cc93cdff5c",
+    "AD5X-eboard.hex": "884a105b3b1b307e3fc06998a2e9c66700dd5e1516ba85cc5a50d932a2a7d88b",
+    "AD5X-ifs.hex": "be7c7ff7c5a3ad1505cfa03a0bb6ddf533db52e9af24e49b04989946a0266613"
+  }
+}
