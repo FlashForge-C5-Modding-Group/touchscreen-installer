@@ -59,7 +59,12 @@ Both modes start with:
    pair per model; it needs `C5_UPDATE_PASSPHRASE`) and add them with
    `MCU_PACKAGE="Creator5Pro-....tgz Creator5-....tgz" make usb`.
    If a board fails to flash, `/usr/data/logs/` is copied to the drive as
-   `opencreator/logs/mcu-flash-<date>-<time>/`.
+   `opencreator/logs/mcu-flash-<date>-<time>/`. On FlashForge kernel 2.0.8 the
+   boards aren't flashed during the install: the checked firmware is left in
+   `/usr/data/opencreator/mcu-flash-pending/`, and `startup.sh` (or
+   `tunneled.sh`) flashes it at the next power-on, before anything wakes the
+   boards. It tries on up to 3 boots; the log is
+   `/usr/data/logs/oc-mcu-flash-pending.log`.
 4. **Camera firmware** (`96-flash-camera-firmware.sh`): FlashForge's camera
    firmware 1226 from their 2.0.0 update, which they ship but don't flash yet.
    Only a camera reporting an older version (USB `05a3:9230`) is flashed, with

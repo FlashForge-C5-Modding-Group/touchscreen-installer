@@ -163,6 +163,72 @@ elif [ "$IGNORE_SUM" = 1 ]; then
 fi
 chmod a+x IAPCommand ISPCommand 2>/dev/null || true
 
+# Kernel 2.0.8: the boards are flashed at the next power-on instead, by
+# startup.sh/tunneled.sh before anything else talks to them.
+if [ "${OC_KERNEL_PACKAGE:-}" = 2.0.8 ]; then
+    PENDING="$DEMO_ROOT/usr/data/opencreator/mcu-flash-pending"
+    rm -rf "$PENDING"
+    mkdir -p "$PENDING" || die "cannot create $PENDING"
+    for f in eBoard.hex heaterBoard.hex levelBoard.hex mainBoardGD.hex IAPCommand ISPCommand; do
+        [ ! -f "$f" ] || cp "$f" "$PENDING/" || die "cannot stage $f in $PENDING"
+    done
+    [ ! -f md5sum.list ] ||
+        grep -E '[ *](\./)?(eBoard|heaterBoard|levelBoard|mainBoardGD)\.hex$|[ *](\./)?(IAP|ISP)Command$' \
+            md5sum.list > "$PENDING/md5sum.list" || die "cannot stage md5sum.list"
+    cat > "$PENDING/flash.sh" <<EOF || die "cannot write $PENDING/flash.sh"
+#!/bin/sh
+# Written by the OpenCreator installer: flashes the MCUs at power-on.
+COMMIT='$COMMIT'
+STAMP='$STAMP'
+MARKER=/usr/data/opencreator/mcu-firmware.commit
+EOF
+    cat >> "$PENDING/flash.sh" <<'EOF' || die "cannot write $PENDING/flash.sh"
+DIR=/usr/data/opencreator/mcu-flash-pending
+LOG=/usr/data/logs/oc-mcu-flash-pending.log
+say() { echo "$(date '+%F %T') $*" >> "$LOG"; }
+# Three boots at most, so a board that never takes it can't stall every start.
+tries=$(cat "$DIR/tries" 2>/dev/null || echo 0)
+if [ "$tries" -ge 3 ]; then
+    say "gave up after 3 boots; the files are kept in $DIR"
+    mv "$DIR/flash.sh" "$DIR/flash.sh.failed"
+    exit 0
+fi
+echo $((tries + 1)) > "$DIR/tries"
+cd "$DIR" || exit 0
+say "flashing the MCUs to $COMMIT (boot $((tries + 1)) of 3)"
+if [ -f md5sum.list ] && ! md5sum -c md5sum.list >> "$LOG" 2>&1; then
+    say "firmware files failed md5 check; not flashing"
+    mv flash.sh flash.sh.failed
+    exit 0
+fi
+failed=0
+for b in eBoard.hex:/dev/ttyS5 heaterBoard.hex:/dev/ttyS4 levelBoard.hex:/dev/ttyS7 mainBoardGD.hex:; do
+    hex=${b%%:*} port=${b#*:}
+    [ -f "$hex" ] || continue
+    ok=
+    for i in 1 2 3; do
+        if [ -n "$port" ]; then
+            ./IAPCommand "$hex" "$port" > /tmp/oc-mcu-flash.log 2>&1
+        else
+            ./ISPCommand "$hex" > /tmp/oc-mcu-flash.log 2>&1
+        fi
+        cat /tmp/oc-mcu-flash.log >> "$LOG"
+        grep -qi "error\|fail\|not" /tmp/oc-mcu-flash.log || { ok=1; break; }
+    done
+    if [ -n "$ok" ]; then say "$hex flashed"; else say "$hex FAILED"; failed=1; fi
+done
+if [ "$failed" = 0 ]; then
+    printf '%s\n%s\n' "$COMMIT" "$STAMP" > "$MARKER"
+    cd / && rm -rf "$DIR"
+    say "all MCUs flashed"
+fi
+EOF
+    chmod 755 "$PENDING/flash.sh" "$PENDING/IAPCommand" "$PENDING/ISPCommand" 2>/dev/null || true
+    sync
+    echo "STAGE FlashForge kernel 2.0.8: the MCU firmware ($SHORT) will be flashed at the next power-on"
+    exit 0
+fi
+
 mkdir -p "$LOG_DIR"
 FAILED=0
 
@@ -231,7 +297,5 @@ save_logs() {
 [ "$FAILED" -eq 0 ] || { save_logs; die "one or more MCUs failed to flash; firmware not marked as installed"; }
 
 mkdir -p "$(dirname "$MARKER")"
-printf '%s
-%s
-' "$COMMIT" "$STAMP" >"$MARKER"
+printf '%s\n%s\n' "$COMMIT" "$STAMP" >"$MARKER"
 echo "STAGE MCU firmware flashed successfully (commit $COMMIT)"
