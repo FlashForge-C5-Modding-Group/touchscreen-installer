@@ -43,11 +43,14 @@ chmod 755 "$OCDIR/startup/startup.sh" "$OCDIR"/startup/scripts/*.sh "$OCDIR/firm
 [ ! -f "$OCDIR/plugin-manager/oc-plugin" ] || chmod 755 "$OCDIR/plugin-manager/oc-plugin"
 [ ! -f "$OCDIR/mcu-flash/oc-mcu-flash" ] || chmod 755 "$OCDIR/mcu-flash/oc-mcu-flash"
 [ ! -f "$OCDIR/loadcell/loadcell.sh" ] || chmod 755 "$OCDIR/loadcell/loadcell.sh"
-chmod 644 "$OCDIR/tunneled/tunneled.sh"
+[ ! -f "$OCDIR/tunneled/tunneled.sh" ] || chmod 644 "$OCDIR/tunneled/tunneled.sh"
 
-oc_overlay "$FS/nginx/conf.d" "$NGINX_CONF_D" "$OCDIR/.installed/nginx-conf.d.md5"
+[ ! -d "$FS/nginx/conf.d" ] || \
+    oc_overlay "$FS/nginx/conf.d" "$NGINX_CONF_D" "$OCDIR/.installed/nginx-conf.d.md5"
 
-if [ "$TOUCHSCREEN" = yes ] && [ ! -f "$GRUMPY_DIR/grumpyscreen.cfg" ]; then
+# the AD5X fs ships no default grumpyscreen.cfg; the grumpy-ff release has one
+if [ "$TOUCHSCREEN" = yes ] && [ ! -f "$GRUMPY_DIR/grumpyscreen.cfg" ] &&
+    [ -f "$FS/grumpyscreen/grumpyscreen.cfg" ]; then
     mkdir -p "$GRUMPY_DIR"
     cp "$FS/grumpyscreen/grumpyscreen.cfg" "$GRUMPY_DIR/grumpyscreen.cfg"
 fi

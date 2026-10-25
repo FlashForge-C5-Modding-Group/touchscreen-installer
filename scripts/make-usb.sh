@@ -14,6 +14,8 @@ BIN=$ROOT/build/mips32/opencreator-installer
 rm -rf "$OUT"
 mkdir -p "$OUT/opencreator/payload" "$OUT/opencreator/backups"
 cp "$ROOT/scripts/runFirmwareExe.sh" "$OUT/runFirmwareExe.sh"
+# the AD5X boot hook runs /mnt/flashforge_init.sh instead
+cp "$ROOT/scripts/runFirmwareExe.sh" "$OUT/flashforge_init.sh"
 cp "$BIN" "$OUT/opencreator/opencreator-installer"
 cp "$ROOT/scripts/install.sh" "$OUT/opencreator/install.sh"
 cp -R "$ROOT/payload-template/." "$OUT/opencreator/payload/"

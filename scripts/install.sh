@@ -357,6 +357,9 @@ check() {
         stage "No prior OpenCreator install record"
     fi
     preflight
+    stage "net: $(ifconfig eth0 2>/dev/null | sed -n 2p | tr -s ' ')"
+    if ping -c1 -W3 1.1.1.1 >/dev/null 2>&1; then stage "net: 1.1.1.1 ok"; else stage "net: 1.1.1.1 fail"; fi
+    if ping -c1 -W3 github.com >/dev/null 2>&1; then stage "net: github ok"; else stage "net: github fail"; fi
     if online; then printf 'NETWORK OK\n'; else printf 'NETWORK DOWN\n'; fi
     warned=
     for folder in $(foreign_folders); do
