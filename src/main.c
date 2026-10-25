@@ -152,6 +152,7 @@ static const char *model_name(void)
 {
     if (strcmp(machine, "Creator5Pro") == 0) return "Creator 5 Pro";
     if (strcmp(machine, "Creator5") == 0) return "Creator 5";
+    if (strcmp(machine, "AD5X") == 0) return "AD5X";
     return "Unknown model";
 }
 
@@ -837,8 +838,8 @@ static void show_page(enum page next)
         set_title(next, "Ready to install");
         lv_label_set_text(body_label, !model_known
             ? "The printer model could not be detected, so installation is blocked. "
-              "/usr/prog/app_startup.sh must declare Creator5 (PID 0028) or "
-              "Creator5Pro (PID 0029)."
+              "/usr/prog/app_startup.sh must declare Creator5 (PID 0028), "
+              "Creator5Pro (PID 0029) or AD5X (PID 0026)."
 #ifdef OC_DEMO
             : "Existing program and config directories are backed up first. "
               "\"Demo install\" runs every step for real but writes under "
@@ -1031,7 +1032,8 @@ static void process_line(char *line)
         char m[32] = "", p[16] = "";
         sscanf(line + 6, "%31s %15s", m, p);
         model_known = (strcmp(m, "Creator5Pro") == 0 && strcmp(p, "0029") == 0) ||
-                      (strcmp(m, "Creator5") == 0 && strcmp(p, "0028") == 0);
+                      (strcmp(m, "Creator5") == 0 && strcmp(p, "0028") == 0) ||
+                      (strcmp(m, "AD5X") == 0 && strcmp(p, "0026") == 0);
         snprintf(machine, sizeof(machine), "%s", model_known ? m : "unknown");
         update_brand();
     } else if (strncmp(line, "WARN ", 5) == 0) {
