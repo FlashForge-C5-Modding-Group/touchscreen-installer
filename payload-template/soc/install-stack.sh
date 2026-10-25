@@ -19,7 +19,12 @@ else
     KALICO_REPO=${OC_KALICO_REPO:-https://github.com/FlashForge-C5-Modding-Group/kalico.git}
     KALICO_BRANCH=${OC_KALICO_BRANCH:-something}
 fi
-OPENCREATOR_FS_REPO=${OC_FS_REPO:-https://github.com/FlashForge-C5-Modding-Group/opencreator-fs.git}
+# the AD5X filesystem lives in its own repo
+if [ "${OC_MACHINE:-}" = AD5X ]; then
+    OPENCREATOR_FS_REPO=${OC_FS_REPO:-https://github.com/FlashForge-C5-Modding-Group/AD5X-FS.git}
+else
+    OPENCREATOR_FS_REPO=${OC_FS_REPO:-https://github.com/FlashForge-C5-Modding-Group/opencreator-fs.git}
+fi
 
 die() { echo "ERROR $*"; exit 1; }
 

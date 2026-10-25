@@ -9,7 +9,12 @@ DEMO_ROOT=${OC_DEMO_ROOT:-}
 TOUCHSCREEN=${OC_TOUCHSCREEN:-no}
 . "$OC_PAYLOAD/common/install-helpers.sh"
 
-OPENCREATOR_FS_REPO=${OC_FS_REPO:-https://github.com/FlashForge-C5-Modding-Group/opencreator-fs.git}
+# the AD5X filesystem lives in its own repo
+if [ "${OC_MACHINE:-}" = AD5X ]; then
+    OPENCREATOR_FS_REPO=${OC_FS_REPO:-https://github.com/FlashForge-C5-Modding-Group/AD5X-FS.git}
+else
+    OPENCREATOR_FS_REPO=${OC_FS_REPO:-https://github.com/FlashForge-C5-Modding-Group/opencreator-fs.git}
+fi
 OCDIR=$DEMO_ROOT/usr/data/opencreator
 NGINX_CONF_D=$DEMO_ROOT/usr/data/nginx/conf.d
 GRUMPY_DIR=$DEMO_ROOT/usr/data/grumpyscreen
