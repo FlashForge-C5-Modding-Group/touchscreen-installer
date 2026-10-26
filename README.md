@@ -98,7 +98,9 @@ Tunnel mode then installs:
 
 - **The socat bridge** (`tunnel/install-tunnel.sh`): `c5_socat.py` from
   opencreator-tunnel's `printer-socat` in `/usr/prog/c5-tunnel-socat`, with
-  `identify_monitor` built by Entware's gcc. Making
+  `identify_monitor` built by Entware's gcc and the bundled usb-serial modules
+  (`modules/`, loaded by `c5_socat.py` only on FlashForge kernel 2.0.8, which
+  has no usb-serial). Making
   `/usr/data/opencreator/tunneled/tunneled.sh` executable switches the board to
   bridge-only mode.
 - **GrumpyScreen**, if chosen.

@@ -26,6 +26,12 @@ echo "STAGE Installing the socat bridge to $BRIDGE_DIR"
 mkdir -p "$BRIDGE_DIR"
 cp "$SRC/c5_socat.py" "$SRC/identify_monitor.c" "$SRC/README.md" "$BRIDGE_DIR/"
 chmod 755 "$BRIDGE_DIR/c5_socat.py"
+# usb-serial for FlashForge kernel 2.0.8, which has none; c5_socat.py loads
+# them only when the running kernel lacks usb-serial.
+if [ -d "$SRC/modules" ]; then
+    rm -rf "$BRIDGE_DIR/modules"
+    cp -r "$SRC/modules" "$BRIDGE_DIR/modules"
+fi
 
 if [ -n "$DEMO_ROOT" ]; then
     echo "STAGE Demo mode: would build identify_monitor with /opt/bin/gcc and" \
