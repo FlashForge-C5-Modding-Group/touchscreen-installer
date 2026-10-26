@@ -26,6 +26,17 @@ echo "STAGE Installing the socat bridge to $BRIDGE_DIR"
 mkdir -p "$BRIDGE_DIR"
 cp "$SRC/c5_socat.py" "$SRC/identify_monitor.c" "$SRC/README.md" "$BRIDGE_DIR/"
 chmod 755 "$BRIDGE_DIR/c5_socat.py"
+# usb-serial modules for FlashForge kernel 2.0.8, which has none. Skip them
+# when usb-serial is built in (/sys/bus/usb-serial exists but usbserial isn't
+# a loadable module); a loaded usbserial module is ours from an earlier
+# install, so keep copying in that case.
+rm -rf "$BRIDGE_DIR/modules"
+if [ -d /sys/bus/usb-serial ] && ! grep -q '^usbserial ' /proc/modules 2>/dev/null; then
+    echo "STAGE usb-serial is built into this kernel; skipping the bundled modules"
+elif [ -d "$SRC/modules" ]; then
+    echo "STAGE Installing usb-serial modules (this kernel has no usb-serial)"
+    cp -r "$SRC/modules" "$BRIDGE_DIR/modules"
+fi
 
 if [ -n "$DEMO_ROOT" ]; then
     echo "STAGE Demo mode: would build identify_monitor with /opt/bin/gcc and" \
