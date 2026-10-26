@@ -110,7 +110,10 @@ if [ -n "$DEMO_ROOT" ]; then
          "--system-site-packages and install scripts/moonraker-requirements.txt"
 else
     [ -x "$PYHF/bin/python3.13" ] || die "hard-float Python is not installed"
-    if grep -qx "home = /usr/data/python-hf/bin" "$MR/moonraker-env/pyvenv.cfg" 2>/dev/null; then
+    # Its python must also run: a copied interpreter can be left needing a
+    # library python-hf no longer has.
+    if grep -qx "home = /usr/data/python-hf/bin" "$MR/moonraker-env/pyvenv.cfg" 2>/dev/null &&
+        "$MR/moonraker-env/bin/python" -c 'import sys' 2>/dev/null; then
         echo "STAGE Moonraker's Python environment is on hard-float Python"
     else
         echo "STAGE Creating Moonraker's Python environment"

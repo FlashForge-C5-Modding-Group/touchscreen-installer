@@ -96,6 +96,43 @@ else
     echo "STAGE All Entware packages already installed"
 fi
 
+# A download cut short can leave a package marked installed with files
+# missing, or a program whose library never arrived (git-remote-https
+# without libatomic.so.1). Find those packages and reinstall them.
+INFO=/opt/lib/opkg/info
+broken_packages() {
+    for list in "$INFO"/*.list; do
+        [ -f "$list" ] || continue
+        package=$(basename "$list" .list)
+        while IFS= read -r file; do
+            file=${file%%	*}
+            [ -e "$file" ] || [ -L "$file" ] || { echo "$package"; break; }
+        done < "$list"
+    done
+    for package in $PACKAGES; do
+        [ -f "$INFO/$package.list" ] || continue
+        while IFS= read -r file; do
+            file=${file%%	*}
+            case $file in *.so|*.so.*) continue ;; esac
+            [ -f "$file" ] && [ -x "$file" ] || continue
+            [ "$(dd if="$file" bs=1 skip=1 count=3 2>/dev/null)" = ELF ] || continue
+            LD_TRACE_LOADED_OBJECTS=1 "$file" 2>&1 | grep -q 'not found' && { echo "$package"; break; }
+        done < "$INFO/$package.list"
+    done
+}
+broken=$(broken_packages | sort -u | tr '\n' ' ')
+if [ -n "$broken" ]; then
+    echo "WARN Damaged Entware packages (an interrupted download?): $broken"
+    /opt/bin/opkg update || die "opkg update failed"
+    repair_package_list
+    echo "STAGE Reinstalling $broken"
+    # shellcheck disable=SC2086
+    oc_run_staged /opt/bin/opkg install --force-reinstall $broken || die "opkg reinstall failed"
+    broken=$(broken_packages | sort -u | tr '\n' ' ')
+    [ -z "$broken" ] || die "Entware packages still damaged after reinstalling: $broken"
+    echo "STAGE Entware packages repaired"
+fi
+
 if [ ! -f /opt/include/stdio.h ]; then
     echo "STAGE Installing compiler headers"
     mkdir -p /opt/include

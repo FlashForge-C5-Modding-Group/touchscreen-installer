@@ -8,7 +8,7 @@ DEMO_ROOT=${OC_DEMO_ROOT:-}
 . "$OC_PAYLOAD/common/install-helpers.sh"
 
 PYHF=$DEMO_ROOT/usr/data/python-hf
-PYTHON_HF_URL=${OC_PYTHON_HF_URL:-https://github.com/FlashForge-C5-Modding-Group/opencreator-fs/releases/download/python-3.13-hardfloat-r2/python-hf-c5-release.zip}
+PYTHON_HF_URL=${OC_PYTHON_HF_URL:-https://github.com/FlashForge-C5-Modding-Group/opencreator-fs/releases/download/python-3.13-hardfloat-r3/python-hf-c5-release.zip}
 CHECK='import ssl, sqlite3, greenlet, cffi, jinja2, serial, numpy'
 
 die() { echo "ERROR $*"; exit 1; }

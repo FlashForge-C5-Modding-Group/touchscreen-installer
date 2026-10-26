@@ -551,7 +551,8 @@ static lv_obj_t *add_button(const char *text, const char *action)
                      strcmp(action, "restore-confirm") == 0 || strcmp(action, "mainsail") == 0 ||
                      strcmp(action, "install-nobackup") == 0 ||
                      strcmp(action, "update-nobackup") == 0 ||
-                     strcmp(action, "update-home") == 0 || strcmp(action, "change-setup") == 0;
+                     strcmp(action, "update-home") == 0 || strcmp(action, "change-setup") == 0 ||
+                     strcmp(action, "cleanup-confirm") == 0 || strcmp(action, "cleanup-back") == 0;
     return make_button(button_row, text, action, !secondary, 220, 58);
 }
 
@@ -574,6 +575,39 @@ static void add_summary_row(const char *label, const char *value)
     lv_obj_set_style_pad_bottom(row, 6, 0);
 }
 
+/* "Yes, delete" on the cleanup page only works after a 10 s countdown. */
+#define OC_CLEANUP_WAIT 10
+static lv_timer_t *cleanup_timer;
+static lv_obj_t *cleanup_yes;
+static int cleanup_left;
+
+static void cleanup_label(void)
+{
+    static char buf[48];
+    if (cleanup_left > 0)
+        snprintf(buf, sizeof(buf), LV_SYMBOL_TRASH "  Yes, delete (%d)", cleanup_left);
+    else
+        snprintf(buf, sizeof(buf), LV_SYMBOL_TRASH "  Yes, delete");
+    lv_label_set_text(lv_obj_get_child(cleanup_yes, 0), buf);
+}
+
+static void stop_cleanup_timer(void)
+{
+    if (cleanup_timer) lv_timer_del(cleanup_timer);
+    cleanup_timer = NULL;
+    cleanup_yes = NULL;
+}
+
+static void cleanup_tick(lv_timer_t *timer)
+{
+    (void)timer;
+    if (--cleanup_left > 0) { cleanup_label(); return; }
+    cleanup_label();
+    lv_obj_clear_state(cleanup_yes, LV_STATE_DISABLED);
+    lv_obj_set_style_text_color(lv_obj_get_child(cleanup_yes, 0), lv_color_hex(0xffffff), 0);
+    stop_cleanup_timer();
+}
+
 static void add_cleanup_button(void)
 {
     add_button(LV_SYMBOL_TRASH "  Clean up storage", "cleanup-confirm");
@@ -582,6 +616,7 @@ static void add_cleanup_button(void)
 static void show_page(enum page next)
 {
     page_now = next;
+    stop_cleanup_timer();
     clear_buttons();
     lv_obj_add_flag(summary_box, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(spinner, LV_OBJ_FLAG_HIDDEN);
@@ -928,9 +963,18 @@ static void show_page(enum page next)
             "Deletes every print file (.gcode, .3mf, .stl), timelapse video and frame, and log, "
             "leftovers of other mods (ZMOD, Anvil), old Moonraker copies, docs and man "
             "pages, caches and FlashForge update downloads. Git checkouts and the "
-            "installer's backups are kept. This can't be undone.");
-        add_button("Back", "cleanup-back");
-        add_button(LV_SYMBOL_TRASH "  Clean up now", "cleanup");
+            "installer's backups are kept.");
+        lv_label_set_text_static(notice_label,
+            LV_SYMBOL_WARNING "  These actions are not reversible: nothing deleted can be brought "
+            "back. OpenCreator takes no responsibility for anything this breaks or removes. "
+            "Do you wish to continue?");
+        lv_obj_clear_flag(notice_label, LV_OBJ_FLAG_HIDDEN);
+        add_button("No, go back", "cleanup-back");
+        cleanup_yes = add_button(LV_SYMBOL_TRASH "  Yes, delete", "cleanup");
+        disable_button(cleanup_yes);
+        cleanup_left = OC_CLEANUP_WAIT;
+        cleanup_label();
+        cleanup_timer = lv_timer_create(cleanup_tick, 1000, NULL);
         break;
     case PAGE_RUNNING:
         set_title(next, restoring ? "Restoring backup"

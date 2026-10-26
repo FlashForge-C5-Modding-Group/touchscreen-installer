@@ -40,7 +40,11 @@ Both modes start with:
    `opkg install` git, curl and gcc (plus Python and Moonraker's build
    dependencies in SoC mode, or socat in tunnel mode). Entware's compiler
    headers go in `/opt/include`, and `/etc/profile` gets `/opt/bin` on `PATH`.
-   An existing Entware is reused.
+   An existing Entware is reused. Packages damaged by an interrupted download
+   are reinstalled (`opkg install --force-reinstall`): those with a file from
+   their opkg file list missing, and those with a program whose shared
+   libraries don't all resolve (checked with `LD_TRACE_LOADED_OBJECTS`, which
+   lists them without running it).
 2. **LoopScript** (`common/install-loopscript.sh`): opencreator-fs's
    `firmwareExe` replaces `/usr/prog/PROGRAM/software/firmwareExe` (the stock
    binary is kept once as `/usr/data/opencreator/firmwareExe.stock`), with its
@@ -83,7 +87,8 @@ SoC mode then installs:
   `.../klipper/gcodes` links to `/usr/data/gcodes`.
 - **Moonraker** (`soc/install-moonraker.sh`), as in the "Update Moonraker"
   guide: current Moonraker in `/usr/prog/moonraker/moonraker` with a
-  `moonraker-env` virtualenv on Entware's Python.
+  `moonraker-env` virtualenv on Entware's Python. Both virtualenvs are reused
+  only if their `python` still runs; otherwise they're recreated.
 - **Web UIs** (`soc/install-web.sh`): the latest Mainsail in
   `/usr/data/mainsail` and Fluidd in `/usr/data/fluidd`. The nginx site
   (`/usr/data/nginx/sites-available/mainsail`) serves the chosen one on port 80.
