@@ -213,7 +213,9 @@ for b in eBoard.hex:/dev/ttyS5 heaterBoard.hex:/dev/ttyS4 levelBoard.hex:/dev/tt
             ./ISPCommand "$hex" > /tmp/oc-mcu-flash.log 2>&1
         fi
         cat /tmp/oc-mcu-flash.log >> "$LOG"
-        grep -qi "error\|fail\|not" /tmp/oc-mcu-flash.log || { ok=1; break; }
+        # Only a reported success counts: a board that never answered can
+        # leave a log with no error in it.
+        grep -qE "sendFileSuccessful|finished successfully" /tmp/oc-mcu-flash.log && { ok=1; break; }
     done
     if [ -n "$ok" ]; then say "$hex flashed"; else say "$hex FAILED"; failed=1; fi
 done
@@ -232,6 +234,12 @@ fi
 mkdir -p "$LOG_DIR"
 FAILED=0
 
+# Only a reported success counts: IAPCommand's "stm32.c sendFileSuccessful"
+# or ISPCommand's "finished successfully". IAPCommand ends every run with
+# "STM32iap finished NA", and a board that never answered (still on its old
+# firmware after a reboot instead of a power cycle) can leave no error.
+flashed() { [ -f "$1" ] && grep -qE "sendFileSuccessful|finished successfully" "$1"; }
+
 flash_iap() {  # flash_iap LABEL HEX PORT
     label=$1 hex=$2 port=$3
     [ -f "$hex" ] || return 0
@@ -245,12 +253,15 @@ flash_iap() {  # flash_iap LABEL HEX PORT
     while [ "$i" -le 3 ]; do
         rm -f "$log"
         ./IAPCommand "$hex" "$port" >"$log" 2>&1 || true
-        if [ -f "$log" ] && ! grep -qi "error\|fail\|not" "$log"; then
+        if flashed "$log"; then
+            grep -E "sendFileSuccessful|finished successfully" "$log" | tail -n 1 | sed 's/^/STAGE   /'
             return 0
         fi
         i=$((i + 1))
     done
     echo "ERROR Flashing $label failed after 3 attempts; see $log"
+    tail -n 5 "$log" 2>/dev/null | sed 's/^/STAGE   /'
+    echo "STAGE If the boards weren't reset, switch the printer off and on (not just reboot) and run the installer again"
     FAILED=1
     return 1
 }
@@ -268,12 +279,15 @@ flash_isp() {  # flash_isp LABEL HEX
     while [ "$i" -le 3 ]; do
         rm -f "$log"
         ./ISPCommand "$hex" >"$log" 2>&1 || true
-        if [ -f "$log" ] && ! grep -qi "error\|fail\|not" "$log"; then
+        if flashed "$log"; then
+            grep -E "sendFileSuccessful|finished successfully" "$log" | tail -n 1 | sed 's/^/STAGE   /'
             return 0
         fi
         i=$((i + 1))
     done
     echo "ERROR Flashing $label failed after 3 attempts; see $log"
+    tail -n 5 "$log" 2>/dev/null | sed 's/^/STAGE   /'
+    echo "STAGE If the boards weren't reset, switch the printer off and on (not just reboot) and run the installer again"
     FAILED=1
     return 1
 }
