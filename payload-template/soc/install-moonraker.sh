@@ -63,7 +63,7 @@ rollback() {
     restore_envs
     [ -z "$OLD_HEAD" ] || git -C "$MR/moonraker" reset -q --hard "$OLD_HEAD" || true
 }
-trap 'rc=$?; oc_swap_off; [ $rc -eq 0 ] || rollback' EXIT
+trap 'rc=$?; [ $rc -eq 0 ] || rollback' EXIT
 rm -rf "$MR/moonraker.old" "$MR/moonraker-env.old"
 
 # First install: old Moonraker environments (FlashForge's soft-float one, or
@@ -122,7 +122,6 @@ else
             || die "cannot create $MR/moonraker-env"
     fi
     echo "STAGE Installing Moonraker's Python packages (this takes a while)"
-    oc_swap_on
     # Wheels Entware's Python 3.13 built carry the same tag (cp313
     # linux_mips) but are soft-float: hard-float pip gets its own cache, and
     # the old one goes.
@@ -148,6 +147,5 @@ rm -rf "$MR/moonraker.old" "$MR/moonraker-env.old"
 rm -f "$ENV_PENDING"
 case "$OC_BACKUP" in */no-backup) rm -rf "$ENV_ARCHIVE" ;; esac
 trap - EXIT
-oc_swap_off
 sync
 echo "STAGE Moonraker installed"

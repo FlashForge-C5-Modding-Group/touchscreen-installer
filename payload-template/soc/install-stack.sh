@@ -33,7 +33,7 @@ rollback() {
     fi
     [ -z "$OLD_HEAD" ] || git -C "$OC/klipper" reset -q --hard "$OLD_HEAD" || true
 }
-trap 'rc=$?; oc_swap_off; rm -rf "$WORK"; [ $rc -eq 0 ] || rollback' EXIT
+trap 'rc=$?; rm -rf "$WORK"; [ $rc -eq 0 ] || rollback' EXIT
 
 # A previous run that was interrupted (power loss) left the original aside.
 for dir in "$OC/klipper" "$OC/klippy-env"; do
@@ -100,7 +100,6 @@ if [ "$KLIPPER" = "$OC/klipper.new" ]; then
 fi
 rm -rf "$OC/klipper.old" "$OC/klippy-env.old"
 trap 'rm -rf "$WORK"' EXIT
-oc_swap_off
 
 echo "STAGE Installing the OpenCreator printer config"
 TEMPLATE=$WORK/opencreator-fs/fs/usr/data/config

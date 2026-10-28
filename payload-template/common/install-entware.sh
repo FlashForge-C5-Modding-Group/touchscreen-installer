@@ -12,11 +12,8 @@ DEMO_ROOT=${OC_DEMO_ROOT:-}
 OPT_STORE=$DEMO_ROOT/usr/data/bin/opt
 ENTWARE=http://bin.entware.net/mipselsf-k3.4
 PACKAGES="git git-http curl ca-bundle gcc tar xz openssh-sftp-server"
+# SoC: Python (and its libraries) come from python-hf, which is hard-float.
 case "$OC_MODE" in
-soc)
-    # Python (and its libraries) come from python-hf, which is hard-float.
-    PACKAGES="$PACKAGES swap-utils"
-    ;;
 tunnel)
     PACKAGES="$PACKAGES socat"
     ;;

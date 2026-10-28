@@ -190,6 +190,11 @@ the detected package; demo installs default to 2.0.7. In the SDL demo,
   page and the error page after a failed install offer to restore it. Folders
   that did not exist at backup time (listed in `absent.list`) are removed.
   MCU firmware is not rolled back.
+- **Stock timelapse frames**: the backup includes
+  `/usr/data/firmwareRes/camera/jpeg`, where the stock firmware keeps its
+  timelapse frames. It can be large, so it's archived without gzip (JPEGs
+  don't compress). If the backup drive doesn't have room for it plus 10 MB,
+  it's skipped with a warning, and Restore backup leaves that folder alone.
 - **Reboot now** button once installation or restore completes.
 
 ### Backend output protocol
@@ -349,6 +354,10 @@ have the same number of lines, differ only in the replaced lines, pass
 launch. Only then does it replace the original, and it is set to `chmod 777`
 and checked again. The original is kept as `app_startup.sh.opencreator-legacy`
 and in the backup. `/usr/prog/scripts/` itself is left in place.
+
+This only runs on a new install. An update over an existing OpenCreator install
+(and Update Configs) never reads or changes `app_startup.sh`: the first
+install already handled it.
 
 ## Stock calibration import
 

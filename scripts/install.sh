@@ -37,7 +37,9 @@ INSTALLER_RELEASE="Public Alpha 4 Fix 1"
 MIN_FREE_KB=${OC_MIN_FREE_KB:-262144}
 BACKUP_FOLDERS="usr/prog/PROGRAM/software/firmwareExe usr/prog/moonraker usr/data/opencreator
 usr/data/mainsail usr/data/fluidd usr/data/nginx usr/prog/c5-tunnel-socat
-usr/prog/logo.jpeg usr/prog/app_startup.sh"
+usr/prog/logo.jpeg usr/prog/app_startup.sh usr/data/firmwareRes/camera/jpeg"
+# Stock timelapse frames: already JPEG, and they can be large
+NO_GZIP_FOLDERS="usr/data/firmwareRes/camera/jpeg"
 
 # Other custom firmware OpenCreator replaces, and the old Moonraker copies
 # left in /usr/prog/moonraker (moonraker-old, moonraker-env-old, numbered or
@@ -397,11 +399,22 @@ backup_folders() {
     for folder in ${1:-$BACKUP_FOLDERS $(foreign_folders | grep -v '^usr/prog/moonraker/') $(old_ff_versions)}; do
         if [ -e "$DEMO_ROOT/$folder" ]; then
             name=$(printf '%s' "$folder" | tr / _)
+            case " $NO_GZIP_FOLDERS " in
+                *" $folder "*)
+                    size=$(du -sk "$DEMO_ROOT/$folder" 2>/dev/null | awk '{ print $1 }')
+                    avail=$(free_kb "$target")
+                    if [ -n "$size" ] && [ -n "$avail" ] && [ $((size + 10240)) -gt "$avail" ]; then
+                        warn "Not enough space on the backup drive for /$folder ($((size / 1024)) MB); skipping it"
+                        continue
+                    fi
+                    gz=0 ;;
+                *) gz=1 ;;
+            esac
             stage "Backing up /$folder"
             # The printer's busybox tar has no -z, so compress separately.
             tar -C "${DEMO_ROOT:-/}" -cf "$target/$name.tar.tmp" "$folder" || die "backup failed: /$folder"
             mv "$target/$name.tar.tmp" "$target/$name.tar"
-            if command -v gzip >/dev/null 2>&1; then
+            if [ "$gz" = 1 ] && command -v gzip >/dev/null 2>&1; then
                 gzip -f "$target/$name.tar" || die "backup compression failed: /$folder"
             fi
         else
