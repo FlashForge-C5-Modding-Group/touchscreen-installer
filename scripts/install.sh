@@ -52,13 +52,26 @@ stage() { printf 'STAGE %s\n' "$*"; }
 warn() { printf 'WARN %s\n' "$*"; }
 progress() { printf 'PROGRESS %s %s\n' "$1" "$2"; }
 die() { printf 'ERROR %s\n' "$*"; exit 1; }
+ensure_app_startup() {
+    target=$DEMO_ROOT/usr/prog/app_startup.sh
+    legacy=$DEMO_ROOT/usr/prog/app_startup.sh.opencreator-legacy
+    if [ ! -f "$target" ] && [ -f "$legacy" ]; then
+        stage "Recovering missing app_startup.sh from opencreator-legacy backup"
+        cp -p "$legacy" "$target"
+        chmod 777 "$target"
+        sync
+    fi
+}
 # Sets MACHINE/PID from the stock boot script, which declares exactly
 # one of the two supported pairs. OC_MACHINE/OC_PID override it.
 detect_model() {
+    ensure_app_startup
     MACHINE=${OC_MACHINE:-}
     PID=${OC_PID:-}
     if [ -z "$MACHINE" ]; then
-        for f in "$DEMO_ROOT/usr/prog/app_startup.sh" "$DEMO_ROOT/usr/prog/PROGRAM/runFirmwareExe.sh"; do
+        for f in "$DEMO_ROOT/usr/prog/app_startup.sh" \
+                 "$DEMO_ROOT/usr/prog/app_startup.sh.opencreator-legacy" \
+                 "$DEMO_ROOT/usr/prog/PROGRAM/runFirmwareExe.sh"; do
             [ -r "$f" ] || continue
             MACHINE=$(sed -n 's/^[[:space:]]*MACHINE=\([A-Za-z0-9]*\).*/\1/p' "$f" | head -n 1)
             PID=$(sed -n 's/^[[:space:]]*PID=\([0-9]*\).*/\1/p' "$f" | head -n 1)
@@ -387,6 +400,7 @@ backup_folders() {
     target=$BACKUP_ROOT/opencreator-$stamp-$$
     mkdir "$target" || die "cannot create backup directory"
     : > "$target/absent.list"
+    ensure_app_startup
     # Old Moonraker copies are already inside the usr/prog/moonraker archive.
     for folder in ${1:-$BACKUP_FOLDERS $(foreign_folders | grep -v '^usr/prog/moonraker/') $(old_ff_versions)}; do
         if [ -e "$DEMO_ROOT/$folder" ]; then
@@ -411,7 +425,10 @@ backup_folders() {
             fi
         else
             stage "Not present, skipping /$folder"
-            printf '%s\n' "$folder" >> "$target/absent.list"
+            case "$folder" in
+                usr/prog/app_startup.sh) ;;
+                *) printf '%s\n' "$folder" >> "$target/absent.list" ;;
+            esac
         fi
     done
     BACKUP_TARGET=$target
@@ -475,9 +492,11 @@ install_payload() {
             OC_TOUCHSCREEN="$TOUCHSCREEN" OC_MACHINE="$MACHINE" OC_PID="$PID" \
             OC_KERNEL_PACKAGE="$KERNEL_PACKAGE" OC_NAN_ADDR="$NAN_ADDR" \
             OC_BACKUP="$BACKUP_TARGET" OC_UPDATE="$UPDATE" OC_KEEP_WEB="$UPDATE" \
-            /bin/sh "$script" || die "failed: ${script##*/}"
+            /bin/sh "$script" || { ensure_app_startup; die "failed: ${script##*/}"; }
+        ensure_app_startup
         progress "$n" "$total"
     done
+    ensure_app_startup
     write_state
     progress "$total" "$total"
     stage "OpenCreator installation complete"
@@ -496,6 +515,7 @@ restore_backup() {
     case "$LATEST_BACKUP" in
         *[!A-Za-z0-9_./-]*) die "backup path contains unsupported characters" ;;
     esac
+    ensure_app_startup
     stage "Restoring from $LATEST_BACKUP"
     total=0
     for folder in $BACKUP_FOLDERS; do total=$((total + 1)); done
@@ -517,10 +537,19 @@ restore_backup() {
             stage "Restoring /$folder"
             rm -rf "$DEMO_ROOT/$folder"
             mkdir -p "$dest"
-            unpack "$archive" | tar -C "$dest" -xf - || die "restore failed: /$folder"
+            if ! unpack "$archive" | tar -C "$dest" -xf -; then
+                ensure_app_startup
+                die "restore failed: /$folder"
+            fi
+            ensure_app_startup
         elif grep -qx "$folder" "$LATEST_BACKUP/absent.list" 2>/dev/null; then
-            stage "Removing /$folder (absent before install)"
-            rm -rf "$DEMO_ROOT/$folder"
+            case "$folder" in
+                usr/prog/app_startup.sh) ;;
+                *)
+                    stage "Removing /$folder (absent before install)"
+                    rm -rf "$DEMO_ROOT/$folder"
+                    ;;
+            esac
         fi
         progress "$n" "$total"
     done
@@ -532,6 +561,11 @@ restore_backup() {
         unpack "$archive" | tar -C "${DEMO_ROOT:-/}" -xf - || die "restore failed: ${archive##*/}"
     done
     rm -f "$INSTALL_STATE"
+    ensure_app_startup
+    if [ ! -f "$DEMO_ROOT/usr/prog/app_startup.sh" ]; then
+        die "critical boot script missing after restore: /usr/prog/app_startup.sh"
+    fi
+    [ -x "$DEMO_ROOT/usr/prog/app_startup.sh" ] || chmod 777 "$DEMO_ROOT/usr/prog/app_startup.sh"
     sync
     stage "Restore complete; reboot to start the restored stack"
 }

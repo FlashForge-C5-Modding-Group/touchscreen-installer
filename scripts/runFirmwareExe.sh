@@ -74,9 +74,18 @@ until quit || ping -c1 -W2 github.com >/dev/null 2>&1 || [ $i -ge 30 ]; do
 done
 kill "$wait_pid" 2>/dev/null
 wait "$wait_pid" 2>/dev/null
+ensure_app_startup() {
+    if [ ! -f /usr/prog/app_startup.sh ] && [ -f /usr/prog/app_startup.sh.opencreator-legacy ]; then
+        echo "Recovering missing /usr/prog/app_startup.sh from opencreator-legacy before boot"
+        cp -p /usr/prog/app_startup.sh.opencreator-legacy /usr/prog/app_startup.sh
+        chmod 777 /usr/prog/app_startup.sh
+        sync
+    fi
+}
 if quit; then
     echo "Quit on the Wi-Fi screen; continuing the normal boot"
     rm -f /tmp/opencreator-quit
+    ensure_app_startup
     sync
     exit 1
 fi
@@ -89,4 +98,5 @@ rc=$?
 sync
 echo "installer exited with $rc; continuing the normal boot"
 sync
+ensure_app_startup
 exit 1
