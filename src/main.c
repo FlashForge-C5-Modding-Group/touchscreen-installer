@@ -90,9 +90,6 @@ static bool space_low;
  * page offers to install again and flash it anyway (force_mcu), checked
  * against the md5sum.list inside it instead. */
 static bool mcu_forceable, force_mcu;
-/* FlashForge firmware version; Tunneled needs 1.9.9 or newer. */
-static char ff_version[32] = "unknown";
-static bool tunnel_blocked;
 static int space_mb;
 static char warn_text[1024];
 static char log_text[12288];
@@ -358,7 +355,7 @@ static void start_action(const char *action)
         splash_until = now_ms() + 1500;
         backup_found[0] = '\0';
         stock_found[0] = '\0';
-        installed_same = update_configs = update_available = space_low = tunnel_blocked = false;
+        installed_same = update_configs = update_available = space_low = false;
         prev_version[0] = '\0';
     } else {
         lv_bar_set_range(progress_bar, 0, 1);
@@ -676,8 +673,8 @@ static void show_page(enum page next)
             static char buf[480];
             snprintf(buf, sizeof(buf),
                      "This printer's kernel package is %s. OpenCreator needs kernel package "
-                     "2.0.1 to 2.0.7 to enable legacy NaN for Entware (FlashForge 1.9.9 has 2.0.7). "
-                     "Install the stock 1.9.9 update from FlashForge, then run this installer again. "
+                     "2.0.1 to 2.0.8 to enable legacy NaN for Entware (FlashForge 1.7.8 to 2.0.0 have one). "
+                     "Install a stock FlashForge update, then run this installer again. "
                      "Nothing has been changed.", kernel_text);
             lv_label_set_text(body_label, buf);
         }
@@ -771,13 +768,8 @@ static void show_page(enum page next)
                 lv_obj_clear_flag(notice_label, LV_OBJ_FLAG_HIDDEN);
             }
             add_button("Change setup", "change-setup");
-            lv_obj_t *nobackup = add_button("Update without backup", "update-nobackup");
-            lv_obj_t *update = add_button(LV_SYMBOL_UPLOAD "  Back up and update", "update");
-            /* Tunneled needs FlashForge 1.9.9; the backend refuses it too. */
-            if (tunnel && tunnel_blocked) {
-                disable_button(nobackup);
-                disable_button(update);
-            }
+            add_button("Update without backup", "update-nobackup");
+            add_button(LV_SYMBOL_UPLOAD "  Back up and update", "update");
             if (stock_found[0]) add_button(LV_SYMBOL_REFRESH "  Rollback to stock", "rollback-confirm");
             add_cleanup_button();
         }
@@ -798,11 +790,8 @@ static void show_page(enum page next)
         }
         add_button("Recovery", "recovery");
         add_button("Update Configs", "update-configs");
-        {
-            /* The same update as an available one, for re-applying it. */
-            lv_obj_t *again = add_button(LV_SYMBOL_REFRESH "  Update again", "update");
-            if (strcmp(prev_mode, "tunnel") == 0 && tunnel_blocked) disable_button(again);
-        }
+        /* The same update as an available one, for re-applying it. */
+        add_button(LV_SYMBOL_REFRESH "  Update again", "update");
         if (backup_found[0]) add_button(LV_SYMBOL_LOOP "  Restore backup", "restore-confirm");
         if (stock_found[0]) add_button(LV_SYMBOL_REFRESH "  Rollback to stock", "rollback-confirm");
         add_cleanup_button();
@@ -810,16 +799,11 @@ static void show_page(enum page next)
     case PAGE_MODE:
         set_title(next, "Where should Klipper run?");
         {
-            static char buf[320];
-            snprintf(buf, sizeof(buf), "%s%s%s%s",
+            lv_label_set_text_static(body_label,
                      update_configs
                          ? (strcmp(prev_mode, "soc") == 0 ? "Currently: on the printer SoC."
                                                            : "Currently: tunneled to another host.")
-                         : "Choose on-device installation or tunnel to another host.",
-                     tunnel_blocked ? "\nTunneled needs FlashForge firmware 1.9.9 (this printer has " : "",
-                     tunnel_blocked ? ff_version : "",
-                     tunnel_blocked ? "). Update the printer to 1.9.9 to use it." : "");
-            lv_label_set_text(body_label, buf);
+                         : "Choose on-device installation or tunnel to another host.");
         }
         if (warn_text[0]) {
             lv_label_set_text_static(notice_label, warn_text);
@@ -828,10 +812,7 @@ static void show_page(enum page next)
         if (installed_same) add_button("Back", "home");
         else if (update_available && model_known) add_button("Back", "update-home");
         add_button("On printer SoC", "soc");
-        {
-            lv_obj_t *tunnel = add_button("Tunneled", "tunnel");
-            if (tunnel_blocked) disable_button(tunnel);
-        }
+        add_button("Tunneled", "tunnel");
         if (backup_found[0] && !installed_same)
             add_button(LV_SYMBOL_LOOP "  Restore backup", "restore-confirm");
         if (stock_found[0] && !installed_same)
@@ -1127,11 +1108,6 @@ static void process_line(char *line)
                       strcmp(prev_web, "mainsail") == 0);
         installed_same = valid && strcmp(prev_version, installer_version) == 0;
         update_available = valid && !installed_same;
-    } else if (strncmp(line, "FIRMWARE ", 9) == 0) {
-        int a = 0, b = 0, c = 0;
-        snprintf(ff_version, sizeof(ff_version), "%.30s", line + 9);
-        tunnel_blocked = sscanf(ff_version, "%d.%d.%d", &a, &b, &c) >= 2 &&
-                         a * 1000000 + b * 1000 + c < 1009009;
     } else if (strcmp(line, "MCUFORCE") == 0) {
         mcu_forceable = true;
     } else if (strncmp(line, "SPACE LOW ", 10) == 0) {

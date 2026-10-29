@@ -216,12 +216,6 @@ detect_ff_version() {
     FF_VERSION=$(cat "${TMPDIR:-/tmp}/oc-ffver.$$"); rm -f "${TMPDIR:-/tmp}/oc-ffver.$$"
     [ -n "$FF_VERSION" ] || { [ -n "$DEMO_ROOT" ] && FF_VERSION=1.9.9; } || FF_VERSION=unknown
 }
-# Tunneled needs FlashForge 1.9.9; an undetectable version isn't blocked.
-tunnel_supported() {
-    detect_ff_version
-    [ "$FF_VERSION" = unknown ] && return 0
-    printf '%s\n' "$FF_VERSION" | awk -F. '{exit !($1 * 1000000 + $2 * 1000 + $3 >= 1009009)}'
-}
 foreign_name() {
     case "$1" in
         usr/data/zmod|usr/data/.mod) echo ZMod ;;
@@ -360,8 +354,6 @@ check() {
     done
     detect_ff_version
     printf 'FIRMWARE %s\n' "$FF_VERSION"
-    tunnel_supported ||
-        stage "FlashForge firmware $FF_VERSION: Tunneled needs 1.9.9"
     if ! space_ok; then
         printf 'SPACE LOW %s\n' "$(($(usable_kb) / 1024))"
         warn "Only $(($(usable_kb) / 1024)) MB free on the printer (/usr/data). A new install needs 2 GB free: free up space first. Updates and config changes still work."
@@ -431,8 +423,6 @@ install_payload() {
     case "$WEB" in mainsail|fluidd|none) ;; *) die "invalid web UI" ;; esac
     case "$TOUCHSCREEN" in yes|no) ;; *) die "invalid touchscreen choice" ;; esac
     [ "$MODE" != tunnel ] || [ "$WEB" = none ] || die "tunnel mode must skip web UI"
-    [ "$MODE" != tunnel ] || tunnel_supported ||
-        die "Tunneled needs FlashForge firmware 1.9.9 (this printer has $FF_VERSION). Update the printer to 1.9.9 first; nothing was changed"
     [ "$MODE" != soc ] || [ "$WEB" != none ] || die "SoC mode requires a web UI"
     detect_model || die "unsupported or undetected printer model"
     stage "Detected $MACHINE (PID $PID)"
@@ -574,8 +564,6 @@ reconfigure() {
     case "$WEB" in mainsail|fluidd|none) ;; *) die "invalid web UI" ;; esac
     case "$TOUCHSCREEN" in yes|no) ;; *) die "invalid touchscreen choice" ;; esac
     [ "$MODE" != tunnel ] || [ "$WEB" = none ] || die "tunnel mode must skip web UI"
-    [ "$MODE" != tunnel ] || tunnel_supported ||
-        die "Tunneled needs FlashForge firmware 1.9.9 (this printer has $FF_VERSION). Update the printer to 1.9.9 first; nothing was changed"
     [ "$MODE" != soc ] || [ "$WEB" != none ] || die "SoC mode requires a web UI"
     [ -f "$INSTALL_STATE" ] || die "no OpenCreator install record; use Recovery instead"
     detect_model || die "unsupported or undetected printer model"
