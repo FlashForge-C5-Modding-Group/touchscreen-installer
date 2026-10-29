@@ -52,7 +52,7 @@ stage() { printf 'STAGE %s\n' "$*"; }
 warn() { printf 'WARN %s\n' "$*"; }
 progress() { printf 'PROGRESS %s %s\n' "$1" "$2"; }
 die() { printf 'ERROR %s\n' "$*"; exit 1; }
-ensure_app_startup() {
+ensure_app_startup() (
     target=$DEMO_ROOT/usr/prog/app_startup.sh
     legacy=$DEMO_ROOT/usr/prog/app_startup.sh.opencreator-legacy
     if [ ! -f "$target" ] && [ -f "$legacy" ]; then
@@ -61,7 +61,7 @@ ensure_app_startup() {
         chmod 777 "$target"
         sync
     fi
-}
+)
 # Sets MACHINE/PID from the stock boot script, which declares exactly
 # one of the two supported pairs. OC_MACHINE/OC_PID override it.
 detect_model() {

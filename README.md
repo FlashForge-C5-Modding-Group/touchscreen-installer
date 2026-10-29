@@ -357,9 +357,18 @@ launch. Only then does it replace the original, and it is set to `chmod 777`
 and checked again. The original is kept as `app_startup.sh.opencreator-legacy`
 and in the backup. `/usr/prog/scripts/` itself is left in place.
 
-This only runs on a new install. An update over an existing OpenCreator install
-(and Update Configs) never reads or changes `app_startup.sh`: the first
-install already handled it.
+Activation also checks for the legacy start line on updates, including when
+`app_startup.sh` was recovered from `.opencreator-legacy` by the installer or
+activation itself. Already-sanitized startup scripts are left unchanged.
+
+If `app_startup.sh` is missing and `.opencreator-legacy` exists, the installer
+recovers it before model detection, backups, and restores, and between payload
+steps. Restore ignores `app_startup.sh` entries in older `absent.list` files
+instead of deleting the boot script.
+
+Run `sh tests/test_app_startup_safety.sh` on a Linux checkout to exercise startup
+recovery, activation failure cleanup, update handling, and an installer
+backup/restore round trip without network access or printer hardware.
 
 ## Stock calibration import
 

@@ -16,8 +16,8 @@ die() { echo "ERROR $*"; exit 1; }
 # app_startup.sh. That script also runs the USB update check, so a broken
 # copy bricks the printer: the line is replaced by a no-op (keeping every
 # block valid), and the result is checked before it replaces the original.
-# Only on a new install: an update (OC_UPDATE=1) never reads or changes
-# app_startup.sh, which the first install already handled.
+# Also check on updates: recovery may have restored the original legacy entry.
+# Already-sanitized startup scripts are left unchanged.
 APP_STARTUP=$DEMO_ROOT/usr/prog/app_startup.sh
 LEGACY_RE='^[[:space:]]*(sh[[:space:]]+)?/usr/prog/scripts/loop/loop\.sh[[:space:]]*&?[[:space:]]*$'
 # If app_startup.sh is missing but the legacy backup exists, restore it first.
@@ -27,7 +27,7 @@ if [ ! -f "$APP_STARTUP" ] && [ -f "$APP_STARTUP.opencreator-legacy" ]; then
     chmod 777 "$APP_STARTUP"
     sync
 fi
-if [ "${OC_UPDATE:-0}" != 1 ] && [ -f "$APP_STARTUP" ] && grep -Eq "$LEGACY_RE" "$APP_STARTUP"; then
+if [ -f "$APP_STARTUP" ] && grep -Eq "$LEGACY_RE" "$APP_STARTUP"; then
     echo "STAGE Disabling the OpenCreator Legacy LoopScript start line"
     matches=$(grep -Ec "$LEGACY_RE" "$APP_STARTUP" || true)
     [ -f "$APP_STARTUP.opencreator-legacy" ] || cp -p "$APP_STARTUP" "$APP_STARTUP.opencreator-legacy"
