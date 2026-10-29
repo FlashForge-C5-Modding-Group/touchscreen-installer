@@ -20,25 +20,19 @@ die() { echo "ERROR $*"; exit 1; }
 # Already-sanitized startup scripts are left unchanged.
 APP_STARTUP=$DEMO_ROOT/usr/prog/app_startup.sh
 LEGACY_RE='^[[:space:]]*(sh[[:space:]]+)?/usr/prog/scripts/loop/loop\.sh[[:space:]]*&?[[:space:]]*$'
-# If app_startup.sh is missing but the legacy backup exists, restore it first.
-if [ ! -f "$APP_STARTUP" ] && [ -f "$APP_STARTUP.opencreator-legacy" ]; then
-    echo "STAGE Recovering missing app_startup.sh from opencreator-legacy backup"
-    cp -p "$APP_STARTUP.opencreator-legacy" "$APP_STARTUP"
-    chmod 777 "$APP_STARTUP"
-    sync
-fi
+# Activation is preparing the current launcher, even before its first install.
+/bin/sh "$OC_PAYLOAD/common/recover-app-startup.sh" opencreator ||
+    die "could not recover app_startup.sh before activation"
 if [ -f "$APP_STARTUP" ] && grep -Eq "$LEGACY_RE" "$APP_STARTUP"; then
     echo "STAGE Disabling the OpenCreator Legacy LoopScript start line"
     matches=$(grep -Ec "$LEGACY_RE" "$APP_STARTUP" || true)
     [ -f "$APP_STARTUP.opencreator-legacy" ] || cp -p "$APP_STARTUP" "$APP_STARTUP.opencreator-legacy"
     new=$APP_STARTUP.opencreator-new
     cleanup_and_recover() {
-        rm -f "$new" "$new.after" "$new.orig"
-        if [ ! -f "$APP_STARTUP" ] && [ -f "$APP_STARTUP.opencreator-legacy" ]; then
-            cp -p "$APP_STARTUP.opencreator-legacy" "$APP_STARTUP" 2>/dev/null || true
-            chmod 777 "$APP_STARTUP" 2>/dev/null || true
-            sync 2>/dev/null || true
-        fi
+        rm -f "$new" "$new.after" "$new.orig" ||
+            echo "WARN could not remove temporary startup files"
+        /bin/sh "$OC_PAYLOAD/common/recover-app-startup.sh" ||
+            echo "ERROR could not recover app_startup.sh during activation cleanup"
     }
     trap cleanup_and_recover EXIT
     rm -f "$new"
@@ -67,9 +61,8 @@ if [ -f "$APP_STARTUP" ] && grep -Eq "$LEGACY_RE" "$APP_STARTUP"; then
     sync
     if [ ! -x "$APP_STARTUP" ] || ! sh -n "$APP_STARTUP"; then
         echo "ERROR app_startup.sh failed post-swap checks; restoring legacy backup"
-        cp -p "$APP_STARTUP.opencreator-legacy" "$APP_STARTUP"
-        chmod 777 "$APP_STARTUP"
-        sync
+        /bin/sh "$OC_PAYLOAD/common/recover-app-startup.sh" auto replace ||
+            die "app_startup.sh check failed and legacy recovery failed"
         die "app_startup.sh check failed after the swap; restored original"
     fi
     trap - EXIT
@@ -102,15 +95,8 @@ mv "$FIRMWARE_EXE.new" "$FIRMWARE_EXE"
 sync
 echo "STAGE LoopScript active"
 
-# Safety guarantee: ensure app_startup.sh exists and is executable before finishing
-if [ ! -f "$APP_STARTUP" ]; then
-    if [ -f "$APP_STARTUP.opencreator-legacy" ]; then
-        echo "STAGE Restoring missing app_startup.sh from opencreator-legacy"
-        cp -p "$APP_STARTUP.opencreator-legacy" "$APP_STARTUP"
-        chmod 777 "$APP_STARTUP"
-        sync
-    else
-        die "critical boot script missing: $APP_STARTUP"
-    fi
-fi
+# Recover with the current launcher selected if a later operation lost startup.
+/bin/sh "$OC_PAYLOAD/common/recover-app-startup.sh" opencreator ||
+    die "could not recover app_startup.sh after activation"
+[ -f "$APP_STARTUP" ] || die "critical boot script missing: $APP_STARTUP"
 [ -x "$APP_STARTUP" ] || chmod 777 "$APP_STARTUP"

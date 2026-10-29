@@ -52,16 +52,11 @@ stage() { printf 'STAGE %s\n' "$*"; }
 warn() { printf 'WARN %s\n' "$*"; }
 progress() { printf 'PROGRESS %s %s\n' "$1" "$2"; }
 die() { printf 'ERROR %s\n' "$*"; exit 1; }
-ensure_app_startup() (
-    target=$DEMO_ROOT/usr/prog/app_startup.sh
-    legacy=$DEMO_ROOT/usr/prog/app_startup.sh.opencreator-legacy
-    if [ ! -f "$target" ] && [ -f "$legacy" ]; then
-        stage "Recovering missing app_startup.sh from opencreator-legacy backup"
-        cp -p "$legacy" "$target"
-        chmod 777 "$target"
-        sync
-    fi
-)
+STARTUP_RECOVERY_MODE=auto
+ensure_app_startup() {
+    /bin/sh "$PAYLOAD/common/recover-app-startup.sh" "$STARTUP_RECOVERY_MODE" ||
+        die "could not recover app_startup.sh"
+}
 # Sets MACHINE/PID from the stock boot script, which declares exactly
 # one of the two supported pairs. OC_MACHINE/OC_PID override it.
 detect_model() {
@@ -493,10 +488,21 @@ install_payload() {
             OC_KERNEL_PACKAGE="$KERNEL_PACKAGE" OC_NAN_ADDR="$NAN_ADDR" \
             OC_BACKUP="$BACKUP_TARGET" OC_UPDATE="$UPDATE" OC_KEEP_WEB="$UPDATE" \
             /bin/sh "$script" || { ensure_app_startup; die "failed: ${script##*/}"; }
+        # Remember activation even if a later step loses the launcher source.
+        if [ "$STARTUP_RECOVERY_MODE" = auto ] &&
+            cmp -s "$DEMO_ROOT/usr/prog/PROGRAM/software/firmwareExe" \
+                "$DEMO_ROOT/usr/data/opencreator/firmware/firmwareExe"; then
+            startup_magic=$(dd if="$DEMO_ROOT/usr/prog/PROGRAM/software/firmwareExe" \
+                bs=1 skip=1 count=3 2>/dev/null) || die "cannot inspect the active firmware launcher"
+            [ "$startup_magic" = ELF ] || STARTUP_RECOVERY_MODE=opencreator
+        fi
         ensure_app_startup
         progress "$n" "$total"
     done
     ensure_app_startup
+    [ -f "$DEMO_ROOT/usr/prog/app_startup.sh" ] &&
+        [ -x "$DEMO_ROOT/usr/prog/app_startup.sh" ] ||
+        die "critical boot script missing or not executable after installation"
     write_state
     progress "$total" "$total"
     stage "OpenCreator installation complete"
@@ -515,7 +521,9 @@ restore_backup() {
     case "$LATEST_BACKUP" in
         *[!A-Za-z0-9_./-]*) die "backup path contains unsupported characters" ;;
     esac
-    ensure_app_startup
+    # Select recovery for the launcher actually restored (firmwareExe is first).
+    # If restore fails before that first step, recover for the current launcher.
+    trap '/bin/sh "$PAYLOAD/common/recover-app-startup.sh" || echo "ERROR startup recovery failed during restore cleanup"' EXIT
     stage "Restoring from $LATEST_BACKUP"
     total=0
     for folder in $BACKUP_FOLDERS; do total=$((total + 1)); done
@@ -541,7 +549,6 @@ restore_backup() {
                 ensure_app_startup
                 die "restore failed: /$folder"
             fi
-            ensure_app_startup
         elif grep -qx "$folder" "$LATEST_BACKUP/absent.list" 2>/dev/null; then
             case "$folder" in
                 usr/prog/app_startup.sh) ;;
@@ -551,6 +558,7 @@ restore_backup() {
                     ;;
             esac
         fi
+        ensure_app_startup
         progress "$n" "$total"
     done
     # Old FlashForge versions the install removed (archives rooted at /)
@@ -567,6 +575,7 @@ restore_backup() {
     fi
     [ -x "$DEMO_ROOT/usr/prog/app_startup.sh" ] || chmod 777 "$DEMO_ROOT/usr/prog/app_startup.sh"
     sync
+    trap - EXIT
     stage "Restore complete; reboot to start the restored stack"
 }
 
@@ -587,7 +596,8 @@ run_step() {  # run_step installers/MODE/NN-name.sh
     OC_PAYLOAD="$PAYLOAD" OC_MODE="$MODE" OC_WEB_UI="$WEB" \
         OC_TOUCHSCREEN="$TOUCHSCREEN" OC_MACHINE="$MACHINE" OC_PID="$PID" \
         OC_KERNEL_PACKAGE="$KERNEL_PACKAGE" OC_NAN_ADDR="$NAN_ADDR" \
-        OC_BACKUP="$BACKUP_TARGET" OC_UPDATE=1 OC_KEEP_WEB=1 /bin/sh "$PAYLOAD/$1" || die "failed: ${1##*/}"
+        OC_BACKUP="$BACKUP_TARGET" OC_UPDATE=1 OC_KEEP_WEB=1 /bin/sh "$PAYLOAD/$1" ||
+        { ensure_app_startup; die "failed: ${1##*/}"; }
 }
 # Update Configs: compares the choices with the install record and only
 # applies what differs. Nothing is backed up and nothing already installed
@@ -647,6 +657,7 @@ reconfigure() {
     n=0
     for step in $steps; do
         run_step "$step"
+        ensure_app_startup
         n=$((n + 1))
         progress "$n" "$total"
     done
@@ -666,6 +677,10 @@ reconfigure() {
             stage "GrumpyScreen turned off (kept on the printer)"
         fi
     fi
+    ensure_app_startup
+    [ -f "$DEMO_ROOT/usr/prog/app_startup.sh" ] &&
+        [ -x "$DEMO_ROOT/usr/prog/app_startup.sh" ] ||
+        die "critical boot script missing or not executable after configuration"
     write_state
     progress "$total" "$total"
     stage "Changes applied; reboot to start with them"

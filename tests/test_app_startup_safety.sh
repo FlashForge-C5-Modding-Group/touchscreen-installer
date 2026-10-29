@@ -15,6 +15,7 @@ fail() {
 FIXTURE_PAYLOAD=$TEST_DIR/payload
 mkdir -p "$FIXTURE_PAYLOAD/installers/soc" "$FIXTURE_PAYLOAD/common"
 cp "$REPO_ROOT/payload-template/common/logo.jpeg" "$FIXTURE_PAYLOAD/common/logo.jpeg"
+cp "$REPO_ROOT/payload-template/common/recover-app-startup.sh" "$FIXTURE_PAYLOAD/common/"
 OC_TEST_ACTIVATION=$REPO_ROOT/payload-template/common/activate-loopscript.sh
 OC_TEST_LAUNCHER=$TEST_DIR/firmwareExe.launcher
 export OC_TEST_ACTIVATION OC_TEST_LAUNCHER
@@ -65,7 +66,7 @@ run_backend() {
         OC_MACHINE= OC_PID= OC_KERNEL_PACKAGE=2.0.7 \
         OC_NEW_INSTALL_MIN_KB=0 OC_MIN_FREE_KB=0 OC_SKIP_BACKUP="${3:-0}" \
         /bin/sh "$REPO_ROOT/scripts/install.sh" "$2" \
-        "$FIXTURE_PAYLOAD" "$1/backup" soc fluidd yes
+        "${5:-$FIXTURE_PAYLOAD}" "$1/backup" soc "${OC_TEST_WEB:-fluidd}" "${4:-yes}"
 }
 
 assert_sanitized_startup() {
@@ -81,6 +82,53 @@ assert_sanitized_startup() {
         fail "USB update hook was removed"
     grep -Fxq '/usr/prog/PROGRAM/software/firmwareExe &' "$1/usr/prog/app_startup.sh" ||
         fail "firmware boot hook was removed"
+}
+
+assert_no_startup_temporaries() {
+    for temporary in "$1/usr/prog/app_startup.sh"* "$1/usr/prog/.app_startup.sh"*; do
+        case "$temporary" in
+            "$1/usr/prog/app_startup.sh"|"$1/usr/prog/app_startup.sh.opencreator-legacy") continue ;;
+        esac
+        [ ! -e "$temporary" ] && [ ! -L "$temporary" ] ||
+            fail "recovery left temporary file $temporary"
+    done
+}
+
+create_existing_install_state() {
+    mkdir -p "$1/usr/data/opencreator"
+    cat <<'EOF' > "$1/usr/data/opencreator/install.json"
+{
+  "installer_version": "0.0.5.0",
+  "machine": "Creator5",
+  "pid": "0028",
+  "mode": "soc",
+  "web_ui": "fluidd",
+  "touchscreen": "yes",
+  "backup": "none",
+  "installed_utc": "2026-01-01T00:00:00Z"
+}
+EOF
+}
+
+create_recovery_cp_failure() {
+    mkdir "$1/bin"
+    cat <<'EOF' > "$1/bin/cp"
+#!/bin/sh
+source=
+destination=
+for argument in "$@"; do
+    source=$destination
+    destination=$argument
+done
+if [ "$source" = "$OC_DEMO_ROOT/usr/prog/app_startup.sh.opencreator-legacy" ]; then
+    if [ "$OC_TEST_CP_FAILURE" = short-write ]; then
+        printf '#!/bin/sh\n' > "$destination"
+    fi
+    exit 1
+fi
+exec "$OC_TEST_REAL_CP" "$@"
+EOF
+    chmod 755 "$1/bin/cp"
 }
 
 test_activation_recovers_missing_startup() {
@@ -301,6 +349,258 @@ EOF
         fail "update changed the existing legacy backup"
 }
 
+test_install_rejects_short_recovery_copy() {
+    root=$TEST_DIR/t10
+    prepare_stock_root "$root"
+    create_legacy_startup "$root/usr/prog/app_startup.sh.opencreator-legacy"
+    cp "$root/usr/prog/app_startup.sh.opencreator-legacy" "$root/expected"
+    create_recovery_cp_failure "$root"
+    real_cp=$(command -v cp)
+    if output=$(PATH="$root/bin:$PATH" OC_TEST_REAL_CP="$real_cp" \
+        OC_TEST_CP_FAILURE=short-write run_backend "$root" install 1 2>&1); then
+        fail "install accepted a partial recovery copy: $output"
+    fi
+    [ ! -e "$root/usr/prog/app_startup.sh" ] ||
+        fail "failed recovery published a partial live startup"
+    [ ! -e "$root/usr/data/opencreator/install.json" ] ||
+        fail "failed recovery wrote install state"
+    [ ! -e "$root/usr/data/opencreator/install.json.tmp" ] ||
+        fail "failed recovery left pending install state"
+    if printf '%s\n' "$output" | grep -Fq 'STAGE OpenCreator installation complete'; then
+        fail "failed recovery reported install success"
+    fi
+    cmp -s "$root/expected" "$root/usr/prog/app_startup.sh.opencreator-legacy" ||
+        fail "failed recovery damaged the legacy backup"
+    assert_no_startup_temporaries "$root"
+}
+
+test_reconfigure_rejects_missing_recovery_copy() {
+    root=$TEST_DIR/t11
+    prepare_activation_root "$root"
+    cp "$OC_TEST_LAUNCHER" "$root/usr/prog/PROGRAM/software/firmwareExe"
+    create_existing_install_state "$root"
+    cp "$root/usr/data/opencreator/install.json" "$root/state.expected"
+    create_legacy_startup "$root/usr/prog/app_startup.sh.opencreator-legacy"
+    cp "$root/usr/prog/app_startup.sh.opencreator-legacy" "$root/expected"
+    create_recovery_cp_failure "$root"
+    real_cp=$(command -v cp)
+    if output=$(PATH="$root/bin:$PATH" OC_TEST_REAL_CP="$real_cp" \
+        OC_TEST_CP_FAILURE=no-file run_backend "$root" reconfigure 1 no 2>&1); then
+        fail "reconfigure accepted a failed recovery copy: $output"
+    fi
+    [ ! -e "$root/usr/prog/app_startup.sh" ] ||
+        fail "failed reconfigure recovery published startup"
+    cmp -s "$root/state.expected" "$root/usr/data/opencreator/install.json" ||
+        fail "failed reconfigure recovery changed existing state"
+    [ ! -e "$root/usr/data/opencreator/install.json.tmp" ] ||
+        fail "failed reconfigure recovery left pending state"
+    cmp -s "$root/expected" "$root/usr/prog/app_startup.sh.opencreator-legacy" ||
+        fail "failed reconfigure recovery changed the legacy backup"
+    assert_no_startup_temporaries "$root"
+}
+
+test_reconfigure_sanitizes_recovered_startup() {
+    root=$TEST_DIR/t12
+    prepare_activation_root "$root"
+    cp "$OC_TEST_LAUNCHER" "$root/usr/prog/PROGRAM/software/firmwareExe"
+    cp "$root/usr/prog/PROGRAM/software/firmwareExe" "$root/firmware.expected"
+    create_existing_install_state "$root"
+    create_legacy_startup "$root/usr/prog/app_startup.sh.opencreator-legacy"
+    cp "$root/usr/prog/app_startup.sh.opencreator-legacy" "$root/expected"
+    # Same SoC/web UI, only yes -> no: no download or hardware payload steps.
+    output=$(run_backend "$root" reconfigure 1 no 2>&1) ||
+        fail "real reconfigure failed: $output"
+    assert_sanitized_startup "$root"
+    cmp -s "$root/expected" "$root/usr/prog/app_startup.sh.opencreator-legacy" ||
+        fail "reconfigure changed the legacy backup"
+    cmp -s "$root/firmware.expected" "$root/usr/prog/PROGRAM/software/firmwareExe" ||
+        fail "reconfigure replaced the current launcher"
+    grep -Fxq '  "touchscreen": "no",' "$root/usr/data/opencreator/install.json" ||
+        fail "reconfigure did not persist the requested configuration"
+    assert_no_startup_temporaries "$root"
+}
+
+test_install_sanitizes_recovery_after_startup_and_source_deletion() {
+    root=$TEST_DIR/t13
+    prepare_stock_root "$root"
+    create_legacy_startup "$root/usr/prog/app_startup.sh"
+    cp "$root/usr/prog/app_startup.sh" "$root/expected"
+    # Only this case gets a stage after real activation; do not mutate the
+    # shared fixture used by the independent install and restore cases.
+    cp -R "$FIXTURE_PAYLOAD" "$root/payload"
+    cat <<'EOF' > "$root/payload/installers/soc/zz-delete-startup.sh"
+#!/bin/sh
+set -eu
+cmp "$OC_TEST_LAUNCHER" "$OC_DEMO_ROOT/usr/prog/PROGRAM/software/firmwareExe"
+rm "$OC_DEMO_ROOT/usr/prog/app_startup.sh"
+rm "$OC_DEMO_ROOT/usr/data/opencreator/firmware/firmwareExe"
+: > "$OC_DEMO_ROOT/late-stage.completed"
+exit 0
+EOF
+    output=$(run_backend "$root" install 1 yes "$root/payload" 2>&1) ||
+        fail "install failed after the successful late payload stage: $output"
+    [ -f "$root/late-stage.completed" ] ||
+        fail "install never completed the startup-deleting payload stage"
+    assert_sanitized_startup "$root"
+    [ -f "$root/usr/data/opencreator/install.json" ] ||
+        fail "successful late-stage recovery did not write install state"
+    cmp -s "$root/expected" "$root/usr/prog/app_startup.sh.opencreator-legacy" ||
+        fail "late-stage recovery changed the legacy backup"
+    cmp -s "$OC_TEST_LAUNCHER" "$root/usr/prog/PROGRAM/software/firmwareExe" ||
+        fail "late-stage recovery replaced the installed launcher"
+    assert_no_startup_temporaries "$root"
+}
+
+test_check_preserves_stock_recovery_despite_stale_install_state() {
+    root=$TEST_DIR/t14
+    prepare_stock_root "$root"
+    create_existing_install_state "$root"
+    cp "$root/usr/data/opencreator/install.json" "$root/state.expected"
+    cp "$root/usr/prog/PROGRAM/software/firmwareExe" "$root/firmware.expected"
+    create_legacy_startup "$root/usr/prog/app_startup.sh.opencreator-legacy"
+    cp "$root/usr/prog/app_startup.sh.opencreator-legacy" "$root/expected"
+    output=$(run_backend "$root" check 2>&1) ||
+        fail "check failed with stock firmware and stale install state: $output"
+    cmp -s "$root/expected" "$root/usr/prog/app_startup.sh" ||
+        fail "stale install state disabled legacy startup despite active stock firmware"
+    [ -x "$root/usr/prog/app_startup.sh" ] ||
+        fail "stock startup recovery is not executable"
+    cmp -s "$root/expected" "$root/usr/prog/app_startup.sh.opencreator-legacy" ||
+        fail "stock recovery changed the legacy backup"
+    cmp -s "$root/firmware.expected" "$root/usr/prog/PROGRAM/software/firmwareExe" ||
+        fail "check replaced active stock firmware"
+    cmp -s "$root/state.expected" "$root/usr/data/opencreator/install.json" ||
+        fail "check changed the stale install record"
+    assert_no_startup_temporaries "$root"
+}
+
+test_restore_recovers_stock_startup_when_startup_archive_is_absent() {
+    root=$TEST_DIR/t15
+    prepare_activation_root "$root"
+    create_existing_install_state "$root"
+    create_legacy_startup "$root/usr/prog/app_startup.sh.opencreator-legacy"
+    cp "$root/usr/prog/app_startup.sh.opencreator-legacy" "$root/startup.expected"
+    cp "$root/usr/prog/PROGRAM/software/firmwareExe" "$root/firmware.expected"
+    backup=$root/backup/opencreator-20260101T000000Z-1
+    mkdir "$backup"
+    printf 'usr/prog/app_startup.sh\n' > "$backup/absent.list"
+    cp "$backup/absent.list" "$root/absent.expected"
+    tar -C "$root" -cf "$backup/usr_prog_PROGRAM_software_firmwareExe.tar" \
+        usr/prog/PROGRAM/software/firmwareExe
+    cp "$backup/usr_prog_PROGRAM_software_firmwareExe.tar" "$root/archive.expected"
+    cp "$OC_TEST_LAUNCHER" "$root/usr/prog/PROGRAM/software/firmwareExe"
+    output=$(run_backend "$root" restore 2>&1) ||
+        fail "restore without a startup archive failed: $output"
+    cmp -s "$root/startup.expected" "$root/usr/prog/app_startup.sh" ||
+        fail "restore left legacy startup disabled after restoring stock firmware"
+    [ -x "$root/usr/prog/app_startup.sh" ] ||
+        fail "startup recovered for stock firmware is not executable"
+    cmp -s "$root/firmware.expected" "$root/usr/prog/PROGRAM/software/firmwareExe" ||
+        fail "restore did not publish the archived stock firmware"
+    cmp -s "$root/startup.expected" "$root/usr/prog/app_startup.sh.opencreator-legacy" ||
+        fail "restore changed the raw legacy backup"
+    cmp -s "$root/archive.expected" "$backup/usr_prog_PROGRAM_software_firmwareExe.tar" ||
+        fail "restore changed the stock firmware archive"
+    cmp -s "$root/absent.expected" "$backup/absent.list" ||
+        fail "restore changed the older backup's absent list"
+    [ ! -e "$root/usr/data/opencreator/install.json" ] ||
+        fail "successful restore retained install state"
+    assert_no_startup_temporaries "$root"
+}
+
+test_failed_restore_recovers_startup_for_current_opencreator_firmware() {
+    root=$TEST_DIR/t16
+    prepare_activation_root "$root"
+    cp "$OC_TEST_LAUNCHER" "$root/usr/prog/PROGRAM/software/firmwareExe"
+    cp "$root/usr/prog/PROGRAM/software/firmwareExe" "$root/firmware.expected"
+    create_existing_install_state "$root"
+    cp "$root/usr/data/opencreator/install.json" "$root/state.expected"
+    create_legacy_startup "$root/usr/prog/app_startup.sh.opencreator-legacy"
+    cp "$root/usr/prog/app_startup.sh.opencreator-legacy" "$root/startup.expected"
+    backup=$root/backup/opencreator-20260101T000000Z-1
+    mkdir "$backup"
+    printf 'usr/prog/app_startup.sh\n' > "$backup/absent.list"
+    # The first restore archive is corrupt, so active firmware stays OC.
+    printf 'corrupt firmware archive\n' > "$backup/usr_prog_PROGRAM_software_firmwareExe.tar.gz"
+    cp "$backup/usr_prog_PROGRAM_software_firmwareExe.tar.gz" "$root/archive.expected"
+    if output=$(run_backend "$root" restore 2>&1); then
+        fail "restore accepted a corrupt first firmware archive: $output"
+    fi
+    assert_sanitized_startup "$root"
+    cmp -s "$root/firmware.expected" "$root/usr/prog/PROGRAM/software/firmwareExe" ||
+        fail "failed restore changed the active OpenCreator launcher"
+    cmp -s "$root/state.expected" "$root/usr/data/opencreator/install.json" ||
+        fail "failed restore changed existing install state"
+    cmp -s "$root/startup.expected" "$root/usr/prog/app_startup.sh.opencreator-legacy" ||
+        fail "failed restore changed the raw legacy backup"
+    cmp -s "$root/archive.expected" "$backup/usr_prog_PROGRAM_software_firmwareExe.tar.gz" ||
+        fail "failed restore changed the corrupt firmware archive"
+    assert_no_startup_temporaries "$root"
+}
+
+test_reconfigure_recovers_startup_deleted_by_web_step() {
+    root=$TEST_DIR/t17
+    prepare_activation_root "$root"
+    cp "$OC_TEST_LAUNCHER" "$root/usr/prog/PROGRAM/software/firmwareExe"
+    create_existing_install_state "$root"
+    create_legacy_startup "$root/usr/prog/app_startup.sh.opencreator-legacy"
+    cp "$root/usr/prog/app_startup.sh.opencreator-legacy" "$root/expected"
+    grep -Ev "$LEGACY_RE" "$root/usr/prog/app_startup.sh.opencreator-legacy" \
+        > "$root/usr/prog/app_startup.sh"
+    chmod 777 "$root/usr/prog/app_startup.sh"
+    cp -R "$FIXTURE_PAYLOAD" "$root/payload"
+    cat <<'EOF' > "$root/payload/installers/soc/20-install-web.sh"
+#!/bin/sh
+set -eu
+rm "$OC_DEMO_ROOT/usr/prog/app_startup.sh"
+: > "$OC_DEMO_ROOT/web-step.completed"
+exit 0
+EOF
+    output=$(OC_TEST_WEB=mainsail run_backend "$root" reconfigure 1 yes "$root/payload" 2>&1) ||
+        fail "web UI reconfigure failed after successful startup-deleting step: $output"
+    [ -f "$root/web-step.completed" ] ||
+        fail "reconfigure did not complete the requested web UI step"
+    assert_sanitized_startup "$root"
+    grep -Fxq '  "web_ui": "mainsail",' "$root/usr/data/opencreator/install.json" ||
+        fail "reconfigure did not persist the requested web UI"
+    cmp -s "$root/expected" "$root/usr/prog/app_startup.sh.opencreator-legacy" ||
+        fail "web UI reconfigure changed the legacy backup"
+    cmp -s "$OC_TEST_LAUNCHER" "$root/usr/prog/PROGRAM/software/firmwareExe" ||
+        fail "web UI reconfigure changed the current launcher"
+    assert_no_startup_temporaries "$root"
+}
+
+test_install_rejects_startup_deleted_without_recovery_backup() {
+    root=$TEST_DIR/t18
+    prepare_stock_root "$root"
+    create_legacy_startup "$root/usr/prog/app_startup.sh"
+    cp -R "$FIXTURE_PAYLOAD" "$root/payload"
+    cat <<'EOF' > "$root/payload/installers/soc/zz-delete-startup-and-backup.sh"
+#!/bin/sh
+set -eu
+cmp "$OC_TEST_LAUNCHER" "$OC_DEMO_ROOT/usr/prog/PROGRAM/software/firmwareExe"
+rm "$OC_DEMO_ROOT/usr/prog/app_startup.sh" \
+    "$OC_DEMO_ROOT/usr/prog/app_startup.sh.opencreator-legacy"
+: > "$OC_DEMO_ROOT/late-stage.completed"
+exit 0
+EOF
+    if output=$(run_backend "$root" install 1 yes "$root/payload" 2>&1); then
+        fail "install succeeded without startup or a recovery backup: $output"
+    fi
+    [ -f "$root/late-stage.completed" ] ||
+        fail "install failed before the startup-and-backup deletion stage completed"
+    [ ! -e "$root/usr/prog/app_startup.sh" ] ||
+        fail "install published startup despite having no recovery source"
+    [ ! -e "$root/usr/data/opencreator/install.json" ] ||
+        fail "unrecoverable startup deletion wrote install state"
+    [ ! -e "$root/usr/data/opencreator/install.json.tmp" ] ||
+        fail "unrecoverable startup deletion left pending install state"
+    if printf '%s\n' "$output" | grep -Fq 'STAGE OpenCreator installation complete'; then
+        fail "unrecoverable startup deletion reported install success"
+    fi
+    assert_no_startup_temporaries "$root"
+}
+
 # Do not invoke test functions in an if/|| condition: POSIX shells would
 # disable errexit inside them and hide unexpected fixture/command failures.
 # Each independent case runs with errexit in its own subshell instead.
@@ -314,7 +614,16 @@ for test_case in \
     test_install_backup_restore_round_trip \
     test_update_activation_sanitizes_recovered_startup \
     test_update_install_sanitizes_startup_recovered_by_detection \
-    test_update_leaves_sanitized_startup_unchanged; do
+    test_update_leaves_sanitized_startup_unchanged \
+    test_install_rejects_short_recovery_copy \
+    test_reconfigure_rejects_missing_recovery_copy \
+    test_reconfigure_sanitizes_recovered_startup \
+    test_install_sanitizes_recovery_after_startup_and_source_deletion \
+    test_check_preserves_stock_recovery_despite_stale_install_state \
+    test_restore_recovers_stock_startup_when_startup_archive_is_absent \
+    test_failed_restore_recovers_startup_for_current_opencreator_firmware \
+    test_reconfigure_recovers_startup_deleted_by_web_step \
+    test_install_rejects_startup_deleted_without_recovery_backup; do
     printf '=== Running %s ===\n' "$test_case"
     set +e
     (
