@@ -608,6 +608,7 @@ reconfigure() {
             steps="installers/soc/01-install-entware.sh installers/soc/02-install-loopscript.sh installers/soc/05-install-python.sh"
             [ -f "$OC/klipper/klipper/klippy/klippy.py" ] && [ -x "$OC/klipper/klippy-env/bin/python" ] ||
                 steps="$steps installers/soc/10-install-stack.sh"
+            steps="$steps installers/soc/12-install-afc.sh"
             # Tunnel installs leave FlashForge's own Moonraker in place.
             git -C "$MR/moonraker" remote get-url origin 2>/dev/null | grep -q Arksine &&
                 [ -x "$MR/moonraker-env/bin/python" ] ||
