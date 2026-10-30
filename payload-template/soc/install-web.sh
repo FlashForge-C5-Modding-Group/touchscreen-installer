@@ -96,10 +96,17 @@ if [ -f "$MOONRAKER_CONF" ]; then
     fi
     add_update_entry mainsail mainsail-crew/mainsail /usr/data/mainsail
     add_update_entry fluidd fluidd-core/fluidd /usr/data/fluidd
-    if ! grep -q '^\[update_manager opencreator\]' "$MOONRAKER_CONF"; then
-        echo "STAGE Adding the OpenCreator configs to Moonraker's update manager"
-        printf '\n[update_manager opencreator]\ntype: git_repo\npath: /usr/data/opencreator/opencreator-fs\norigin: https://github.com/FlashForge-C5-Modding-Group/opencreator-fs.git\nprimary_branch: main\nis_system_service: False\n' \
-            >> "$MOONRAKER_CONF"
+    if [ "${OC_MACHINE:-}" = AD5X ]; then
+        FS_SECTION=openad5x
+        FS_ORIGIN=https://github.com/FlashForge-C5-Modding-Group/AD5X-FS.git
+    else
+        FS_SECTION=opencreator
+        FS_ORIGIN=https://github.com/FlashForge-C5-Modding-Group/opencreator-fs.git
+    fi
+    if ! grep -q "^\[update_manager $FS_SECTION\]" "$MOONRAKER_CONF"; then
+        echo "STAGE Adding the $FS_SECTION configs to Moonraker's update manager"
+        printf '\n[update_manager %s]\ntype: git_repo\npath: %s/opencreator-fs\norigin: %s\nprimary_branch: main\nis_system_service: False\n' \
+            "$FS_SECTION" "$OC_HOME" "$FS_ORIGIN" >> "$MOONRAKER_CONF"
     fi
 fi
 sync
