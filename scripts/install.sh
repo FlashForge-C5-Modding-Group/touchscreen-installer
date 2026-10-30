@@ -16,6 +16,11 @@ TOUCHSCREEN=${6:-yes}
 # prefixes its own absolute paths the same way.
 DEMO_ROOT=${OC_DEMO_ROOT:-}
 export OC_DEMO_ROOT="$DEMO_ROOT"
+# The folder the installed files live in: the AD5X's own, else OpenCreator's.
+# payload-template/common/install-helpers.sh sets the same from OC_MACHINE.
+OC_HOME=/usr/data/opencreator
+early_machine=${OC_MACHINE:-$(sed -n 's/^[[:space:]]*MACHINE=\([A-Za-z0-9]*\).*/\1/p' "$DEMO_ROOT/usr/prog/app_startup.sh" 2>/dev/null | head -n 1)}
+[ "$early_machine" != AD5X ] || OC_HOME=/usr/data/openad5x
 # Entware (installed by the first payload step) provides git, curl, gcc
 # and Python; later steps find it here.
 export PATH=/opt/bin:/opt/sbin:$PATH
@@ -23,19 +28,19 @@ export PATH=/opt/bin:/opt/sbin:$PATH
 # write /.cache), and /tmp is a small RAM disk; use /usr/data for both.
 if [ -z "$DEMO_ROOT" ]; then
     if [ -z "${HOME:-}" ] || ! touch "$HOME/.oc-write-test" 2>/dev/null; then
-        export HOME=/usr/data/opencreator/home
+        export HOME=$OC_HOME/home
     fi
     rm -f "$HOME/.oc-write-test"
-    export TMPDIR=/usr/data/opencreator/tmp
+    export TMPDIR=$OC_HOME/tmp
     mkdir -p "$HOME" "$TMPDIR"
     rm -rf "${TMPDIR:?}"/* 2>/dev/null || true
 fi
-STATE_DIR=${OC_STATE_DIR:-"$DEMO_ROOT/usr/data/opencreator"}
+STATE_DIR=${OC_STATE_DIR:-"$DEMO_ROOT$OC_HOME"}
 INSTALL_STATE=$STATE_DIR/install.json
 INSTALLER_VERSION=0.0.2
 INSTALLER_RELEASE="Public Alpha 2"
 MIN_FREE_KB=${OC_MIN_FREE_KB:-262144}
-BACKUP_FOLDERS="usr/prog/PROGRAM/software/firmwareExe usr/prog/moonraker usr/data/opencreator
+BACKUP_FOLDERS="usr/prog/PROGRAM/software/firmwareExe usr/prog/moonraker ${OC_HOME#/}
 usr/data/mainsail usr/data/fluidd usr/data/nginx usr/prog/c5-tunnel-socat
 usr/prog/logo.jpeg usr/prog/app_startup.sh"
 
@@ -399,7 +404,7 @@ backup_folders() {
     BACKUP_ROOT=$(readlink -f "$BACKUP_ROOT") || die "cannot resolve backup destination"
     case "$BACKUP_ROOT" in
         /usr/prog/PROGRAM|/usr/prog/PROGRAM/*|/usr/prog/moonraker|/usr/prog/moonraker/*|\
-/usr/data/opencreator|/usr/data/opencreator/*|/usr/data/mainsail|/usr/data/mainsail/*|\
+$OC_HOME|$OC_HOME/*|/usr/data/mainsail|/usr/data/mainsail/*|\
 /usr/data/fluidd|/usr/data/fluidd/*|/usr/data/nginx|/usr/data/nginx/*|\
 /usr/prog/c5-tunnel-socat|/usr/prog/c5-tunnel-socat/*)
             die "backup destination cannot be inside a source directory" ;;
@@ -589,7 +594,7 @@ reconfigure() {
     RECORDED_BACKUP=$(state_value backup)
     BACKUP_TARGET=$STATE_DIR/no-backup
     mkdir -p "$BACKUP_TARGET"
-    OC=$DEMO_ROOT/usr/data/opencreator
+    OC=$DEMO_ROOT$OC_HOME
     MR=$DEMO_ROOT/usr/prog/moonraker
     TUNNELED=$OC/tunneled/tunneled.sh
     GRUMPY_DIR=$DEMO_ROOT/usr/data/grumpyscreen

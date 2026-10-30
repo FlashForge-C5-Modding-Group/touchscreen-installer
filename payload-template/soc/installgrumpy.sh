@@ -69,7 +69,7 @@ fi
 # from here and compares it with the latest release's tag.
 printf '{"project_name": "grumpyscreen", "project_owner": "%s", "version": "%s", "asset_name": "%s"}\n' \
     "${REPO%%/*}" "$tag" "$ASSET" > "$destination/release_info.json"
-MOONRAKER_CONF=$DEMO_ROOT/usr/data/opencreator/klipper/config/moonraker.conf
+MOONRAKER_CONF=$DEMO_ROOT$OC_HOME/klipper/config/moonraker.conf
 if [ "${OC_MODE:-}" = soc ] && [ -f "$MOONRAKER_CONF" ] &&
     ! grep -q '^\[update_manager grumpyscreen\]' "$MOONRAKER_CONF"; then
     echo "STAGE Adding GrumpyScreen to Moonraker's update manager"

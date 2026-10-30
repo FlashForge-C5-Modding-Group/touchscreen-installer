@@ -2,7 +2,7 @@
 # Printer SoC mode: current Moonraker in /usr/prog/moonraker/moonraker with
 # a virtualenv on the hard-float Python in /usr/data/python-hf. pip builds
 # its C extensions with python-hf's gcc wrapper, so they are hard-float too.
-# LoopScript's 20-msmr.sh starts it with -d /usr/data/opencreator/klipper.
+# LoopScript's 20-msmr.sh starts it with -d $OC_HOME/klipper.
 set -eu
 : "${OC_PAYLOAD:?}"
 : "${OC_BACKUP:?}"
@@ -22,7 +22,7 @@ fi
 
 # Old environments a first install removes are archived first; this file
 # points at the archive until the install finishes.
-ENV_PENDING=$DEMO_ROOT/usr/data/opencreator/.moonraker-envs-pending
+ENV_PENDING=$DEMO_ROOT$OC_HOME/.moonraker-envs-pending
 restore_envs() {
     [ -f "$ENV_PENDING" ] || return 0
     arch=$(cat "$ENV_PENDING")

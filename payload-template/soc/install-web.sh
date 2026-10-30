@@ -30,7 +30,7 @@ install_zip_release() {  # install_zip_release REPO ASSET DEST
     unzip -oq "$WORK/$asset" -d "$WORK/unpacked" || { rm -rf "$WORK"; die "cannot unpack $asset"; }
     # Laid over the installed UI, so files the user added (custom config.json
     # and such) stay.
-    oc_overlay "$WORK/unpacked" "$dest" "$DEMO_ROOT/usr/data/opencreator/.installed/${asset%.zip}.md5" nosave
+    oc_overlay "$WORK/unpacked" "$dest" "$DEMO_ROOT$OC_HOME/.installed/${asset%.zip}.md5" nosave
     rm -rf "$WORK"
 }
 
@@ -72,7 +72,7 @@ if [ "${OC_MACHINE:-}" != AD5X ]; then
 fi
 
 # A kept, older moonraker.conf may lack an update section for one of the UIs.
-MOONRAKER_CONF=$DEMO_ROOT/usr/data/opencreator/klipper/config/moonraker.conf
+MOONRAKER_CONF=$DEMO_ROOT$OC_HOME/klipper/config/moonraker.conf
 add_update_entry() {  # add_update_entry NAME REPO PATH
     grep -q "^\[update_manager $1\]" "$MOONRAKER_CONF" && return 0
     echo "STAGE Adding $1 to Moonraker's update manager"

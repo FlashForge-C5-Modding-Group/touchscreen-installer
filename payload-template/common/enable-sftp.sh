@@ -6,7 +6,7 @@ set -eu
 : "${OC_PAYLOAD:?}"
 DEMO_ROOT=${OC_DEMO_ROOT:-}
 . "$OC_PAYLOAD/common/install-helpers.sh"
-ENABLER=$DEMO_ROOT/usr/data/opencreator/startup/scripts/06-sftp.sh
+ENABLER=$DEMO_ROOT$OC_HOME/startup/scripts/06-sftp.sh
 
 if [ -n "$DEMO_ROOT" ]; then
     echo "STAGE Demo mode: would install openssh-sftp-server and run $ENABLER"

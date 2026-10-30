@@ -8,11 +8,11 @@ DEMO_ROOT=${OC_DEMO_ROOT:-}
 . "$OC_PAYLOAD/common/install-helpers.sh"
 
 TIMELAPSE_REPO=${TIMELAPSE_REPO:-https://github.com/mainsail-crew/moonraker-timelapse.git}
-TL=$DEMO_ROOT/usr/data/opencreator/moonraker-timelapse
+TL=$DEMO_ROOT$OC_HOME/moonraker-timelapse
 MR=$DEMO_ROOT/usr/prog/moonraker
-CONFIG=$DEMO_ROOT/usr/data/opencreator/klipper/config
+CONFIG=$DEMO_ROOT$OC_HOME/klipper/config
 MOONRAKER_CONF=$CONFIG/moonraker.conf
-OUT=/usr/data/opencreator/timelapse
+OUT=$OC_HOME/timelapse
 
 die() { echo "ERROR $*"; exit 1; }
 
@@ -68,8 +68,8 @@ if [ -f "$MOONRAKER_CONF" ]; then
             "$OUT" "$OUT" "$OUT" >> "$MOONRAKER_CONF"
     fi
     if ! grep -q '^\[update_manager timelapse\]' "$MOONRAKER_CONF"; then
-        printf '\n[update_manager timelapse]\ntype: git_repo\nprimary_branch: main\npath: /usr/data/opencreator/moonraker-timelapse\norigin: %s\nmanaged_services: klipper moonraker\n' \
-            "$TIMELAPSE_REPO" >> "$MOONRAKER_CONF"
+        printf '\n[update_manager timelapse]\ntype: git_repo\nprimary_branch: main\npath: %s\norigin: %s\nmanaged_services: klipper moonraker\n' \
+            "$OC_HOME/moonraker-timelapse" "$TIMELAPSE_REPO" >> "$MOONRAKER_CONF"
     fi
 fi
 sync
