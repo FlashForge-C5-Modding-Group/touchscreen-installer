@@ -3,10 +3,11 @@
 # and the OpenCreator boot logo. Earlier failures leave the stock ones.
 set -eu
 DEMO_ROOT=${OC_DEMO_ROOT:-}
-OCDIR=$DEMO_ROOT/usr/data/opencreator
+: "${OC_PAYLOAD:?}"
+. "$OC_PAYLOAD/common/install-helpers.sh"
+OCDIR=$DEMO_ROOT$OC_HOME
 FIRMWARE_EXE=$DEMO_ROOT/usr/prog/PROGRAM/software/firmwareExe
 LOGO=$DEMO_ROOT/usr/prog/logo.jpeg
-: "${OC_PAYLOAD:?}"
 
 die() { echo "ERROR $*"; exit 1; }
 

@@ -15,7 +15,7 @@ if [ "${OC_MACHINE:-}" = AD5X ]; then
 else
     OPENCREATOR_FS_REPO=${OC_FS_REPO:-https://github.com/FlashForge-C5-Modding-Group/opencreator-fs.git}
 fi
-OCDIR=$DEMO_ROOT/usr/data/opencreator
+OCDIR=$DEMO_ROOT$OC_HOME
 NGINX_CONF_D=$DEMO_ROOT/usr/data/nginx/conf.d
 GRUMPY_DIR=$DEMO_ROOT/usr/data/grumpyscreen
 

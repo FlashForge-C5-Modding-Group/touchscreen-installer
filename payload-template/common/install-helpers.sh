@@ -2,6 +2,13 @@
 # a downloaded GitHub release asset, and progress for long commands.
 # Sourced (". install-helpers.sh"), not executed.
 
+# The folder the installed files live in
+if [ "${OC_MACHINE:-}" = AD5X ]; then
+    OC_HOME=/usr/data/openad5x
+else
+    OC_HOME=/usr/data/opencreator
+fi
+
 # oc_git_clone_shallow URL DEST [BRANCH]
 # Depth-1 clone: just the latest commit, not the whole history, so
 # repeated installs don't fill up the printer's limited storage.
@@ -79,8 +86,8 @@ oc_run_staged() {
 # is already on or mkswap/swapon are missing, and the kernel's support is
 # tried with a 1 MB file before 512 MB are written. A failure is remembered
 # in OC_SWAP_BROKEN so later installs don't try again.
-OC_SWAPFILE=/usr/data/opencreator/swapfile
-OC_SWAP_BROKEN=/usr/data/opencreator/.swap-unsupported
+OC_SWAPFILE=$OC_HOME/swapfile
+OC_SWAP_BROKEN=$OC_HOME/.swap-unsupported
 oc_swap_on() {
     [ -z "${OC_DEMO_ROOT:-}" ] || return 0
     command -v mkswap >/dev/null 2>&1 && command -v swapon >/dev/null 2>&1 || return 0
