@@ -77,7 +77,38 @@ else
     KLIPPER=$OC/klipper.new
 fi
 
-if [ -n "$DEMO_ROOT" ]; then
+if [ "${OC_MACHINE:-}" = AD5X ]; then
+    # The AD5X Python (install-python.sh) and the C helper that comes with it
+    AD5XPY=$DEMO_ROOT$OC_HOME/python
+    if [ -n "$DEMO_ROOT" ]; then
+        echo "STAGE Demo mode: would create $OC/klippy-env with the AD5X Python and install its c_helper.so"
+    else
+        [ -x "$AD5XPY/bin/python3.14" ] || die "the AD5X Python is not installed"
+        if grep -qx "home = $AD5XPY/bin" "$OC/klippy-env/pyvenv.cfg" 2>/dev/null; then
+            echo "STAGE Kalico's Python environment is up to date"
+        else
+            echo "STAGE Creating Kalico's Python environment"
+            rm -rf "$OC/klippy-env.old"
+            [ ! -d "$OC/klippy-env" ] || mv "$OC/klippy-env" "$OC/klippy-env.old"
+            "$AD5XPY/bin/python3.14" -m venv --without-pip --system-site-packages "$OC/klippy-env" \
+                || die "cannot create $OC/klippy-env"
+        fi
+
+        echo "STAGE Installing Kalico's C helper"
+        # This Python has no compiler on the printer: the package carries a c_helper.so built from
+        # kalico-ad5x. It is only valid while the checkout's C sources are the ones it was built from.
+        [ -f "$AD5XPY/chelper/c_helper.so" ] || die "the AD5X Python package has no c_helper.so"
+        (cd "$KLIPPER/klippy/chelper" && ls *.c *.h | sort | xargs cat) > "$WORK/chelper.all"
+        if [ "$(sha256_of "$WORK/chelper.all")" != "$(cat "$AD5XPY/chelper/SOURCES.sha256")" ]; then
+            die "Kalico's C helper changed since the AD5X Python package was built (kalico-ad5x $(cut -c1-8 "$AD5XPY/chelper/KALICO_COMMIT")); the package has to be rebuilt"
+        fi
+        cp "$AD5XPY/chelper/c_helper.so" "$KLIPPER/klippy/chelper/c_helper.so" \
+            || die "cannot install c_helper.so"
+        # Klippy only builds the helper when the sources are newer than it; this proves it loads
+        (cd "$KLIPPER/klippy" && "$OC/klippy-env/bin/python" -c 'import chelper; chelper.get_ffi()') \
+            || die "c_helper.so does not load on this printer"
+    fi
+elif [ -n "$DEMO_ROOT" ]; then
     echo "STAGE Demo mode: would create $OC/klippy-env with python-hf -m venv" \
          "--without-pip --system-site-packages and build klippy/chelper"
 else

@@ -17,16 +17,15 @@ echo "=== $(date) $*"
 [ "$(uname -m)" = mips ] || { echo "not a FlashForge MIPS printer"; exit 1; }
 
 # Legacy NaN and Entware first: anything that runs a shell needs them when
-# the root shell is Entware's (for example /opt/bin/bash). The AD5X is
-# NaN2008 throughout and its kernel has no such switch: never poke it there.
-if [ "${1:-}" != AD5X ]; then
-    case "$(ls /usr/prog/PROGRAM/kernel/ 2>/dev/null | head -n 1)" in
-        2.0.1|2.0.2|2.0.3|2.0.4|2.0.5|2.0.6) busybox devmem 0x00a130d1 8 1 ;;
-        2.0.7) busybox devmem 0x00B330D1 8 1 ;;
-        2.0.8) busybox devmem 0x00B030D1 8 1 ;;
-        *) echo "unknown kernel package; legacy NaN not enabled" ;;
-    esac
-fi
+# the root shell is Entware's (for example /opt/bin/bash). The AD5X needs it
+# too: its userland is NaN2008, but Entware's programs (grep among them) are
+# legacy NaN. Tested on the AD5X with kernel package 2.0.1.
+case "$(ls /usr/prog/PROGRAM/kernel/ 2>/dev/null | head -n 1)" in
+    2.0.1|2.0.2|2.0.3|2.0.4|2.0.5|2.0.6) busybox devmem 0x00a130d1 8 1 ;;
+    2.0.7) busybox devmem 0x00B330D1 8 1 ;;
+    2.0.8) busybox devmem 0x00B030D1 8 1 ;;
+    *) echo "unknown kernel package; legacy NaN not enabled" ;;
+esac
 if [ ! -x /opt/bin/opkg ] && [ -d /usr/data/bin/opt ] && ! grep -q ' /opt ' /proc/mounts; then
     mount --bind /usr/data/bin/opt /opt
 fi

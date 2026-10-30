@@ -9,6 +9,9 @@ set -eu
 DEMO_ROOT=${OC_DEMO_ROOT:-}
 . "$OC_PAYLOAD/common/install-helpers.sh"
 
+# AD5X: Moonraker comes with the AD5X Python package (install-python.sh); this step does not touch it
+[ "${OC_MACHINE:-}" != AD5X ] || { echo "STAGE The AD5X's Moonraker comes with its Python package"; exit 0; }
+
 MR=$DEMO_ROOT/usr/prog/moonraker
 PYHF=$DEMO_ROOT/usr/data/python-hf
 MOONRAKER_REPO=https://github.com/Arksine/moonraker.git

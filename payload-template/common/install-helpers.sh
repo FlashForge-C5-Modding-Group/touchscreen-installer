@@ -149,3 +149,20 @@ oc_overlay() {
     mv "$new" "$manifest"
     return 0
 }
+
+# sha256_of FILE: prints the hash. The first tool that prints a real hash wins: a sha256sum
+# on PATH can be a broken link or applet left by another mod.
+sha256_of() {
+    for tool in sha256sum "busybox sha256sum" /opt/bin/sha256sum ff-openssl openssl; do
+        case $tool in
+            ff-openssl) out=$(LD_LIBRARY_PATH=/usr/prog/openssl-1.0.2d/lib \
+                /usr/prog/openssl-1.0.2d/bin/openssl dgst -sha256 < "$1" 2>/dev/null | sed 's/^.*= *//') ;;
+            openssl) out=$(openssl dgst -sha256 < "$1" 2>/dev/null | sed 's/^.*= *//') ;;
+            *) out=$($tool < "$1" 2>/dev/null | cut -d' ' -f1) ;;
+        esac
+        case $out in
+            [0-9a-f][0-9a-f][0-9a-f][0-9a-f]*) [ ${#out} -eq 64 ] && { echo "$out"; return 0; } ;;
+        esac
+    done
+    return 1
+}

@@ -88,14 +88,13 @@ kernel_supported() {
         KERNEL_PACKAGE=2.0.7
         [ "${MACHINE:-}" = AD5X ] && KERNEL_PACKAGE=2.0.1
     fi
-    # The AD5X's X2600 kernel only runs NaN2008 binaries and its userland is
-    # built that way; there is no legacy-NaN switch to poke (its 2.0.1 is not
-    # the C5 2.0.1 kernel, so the C5 address must never be used on it)
+    # The AD5X's userland is NaN2008, but Entware's programs are legacy NaN and
+    # only run once the kernel's switch is set. Tested on the AD5X (kernel
+    # package 2.0.1): 0x00a130d1 reads back 0x01 and Entware's gcc and git run.
     if [ "${MACHINE:-}" = AD5X ]; then
-        NAN_ADDR=
         case "$KERNEL_PACKAGE" in
-            2.0.1) return 0 ;;
-            *) KERNEL_PACKAGE=${KERNEL_PACKAGE:-unknown}; return 1 ;;
+            2.0.1) NAN_ADDR=0x00a130d1; return 0 ;;
+            *) KERNEL_PACKAGE=${KERNEL_PACKAGE:-unknown}; NAN_ADDR=; return 1 ;;
         esac
     fi
     case "$KERNEL_PACKAGE" in

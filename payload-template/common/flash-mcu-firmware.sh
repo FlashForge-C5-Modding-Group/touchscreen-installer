@@ -41,23 +41,6 @@ extract() {  # extract ARCHIVE DEST
 # is still flashed, but only if every file inside matches md5sum.list.
 IGNORE_SUM=${OC_IGNORE_MCU_CHECKSUM:-0}
 
-# The first tool that prints a real hash wins: a sha256sum on PATH can be a
-# broken link or applet left by another mod.
-sha256_of() {
-    for tool in sha256sum "busybox sha256sum" /opt/bin/sha256sum ff-openssl openssl; do
-        case $tool in
-            ff-openssl) out=$(LD_LIBRARY_PATH=/usr/prog/openssl-1.0.2d/lib \
-                /usr/prog/openssl-1.0.2d/bin/openssl dgst -sha256 < "$1" 2>/dev/null | sed 's/^.*= *//') ;;
-            openssl) out=$(openssl dgst -sha256 < "$1" 2>/dev/null | sed 's/^.*= *//') ;;
-            *) out=$($tool < "$1" 2>/dev/null | cut -d' ' -f1) ;;
-        esac
-        case $out in
-            [0-9a-f][0-9a-f][0-9a-f][0-9a-f]*) [ ${#out} -eq 64 ] && { echo "$out"; return 0; } ;;
-        esac
-    done
-    return 1
-}
-
 # AD5X: the images in the AD5X-FS clone the installer keeps (mcu-firmware/ad5x), flashed by
 # ad5x-mcu-flash: the mainboard and the IFS live, the eboard at the next power cycle
 if [ "${OC_MACHINE:-}" = AD5X ]; then
