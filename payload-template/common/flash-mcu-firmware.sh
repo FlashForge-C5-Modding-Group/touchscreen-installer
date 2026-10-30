@@ -17,6 +17,7 @@
 set -eu
 : "${OC_PAYLOAD:?}"
 DEMO_ROOT=${OC_DEMO_ROOT:-}
+. "$OC_PAYLOAD/common/install-helpers.sh"
 
 FW_DIR="$OC_PAYLOAD/mcu-firmware"
 MARKER="$DEMO_ROOT/usr/data/opencreator/mcu-firmware.commit"
@@ -39,6 +40,57 @@ extract() {  # extract ARCHIVE DEST
 # OC_IGNORE_MCU_CHECKSUM=1 ("Flash anyway"): a package that fails its sha256
 # is still flashed, but only if every file inside matches md5sum.list.
 IGNORE_SUM=${OC_IGNORE_MCU_CHECKSUM:-0}
+
+# The first tool that prints a real hash wins: a sha256sum on PATH can be a
+# broken link or applet left by another mod.
+sha256_of() {
+    for tool in sha256sum "busybox sha256sum" /opt/bin/sha256sum ff-openssl openssl; do
+        case $tool in
+            ff-openssl) out=$(LD_LIBRARY_PATH=/usr/prog/openssl-1.0.2d/lib \
+                /usr/prog/openssl-1.0.2d/bin/openssl dgst -sha256 < "$1" 2>/dev/null | sed 's/^.*= *//') ;;
+            openssl) out=$(openssl dgst -sha256 < "$1" 2>/dev/null | sed 's/^.*= *//') ;;
+            *) out=$($tool < "$1" 2>/dev/null | cut -d' ' -f1) ;;
+        esac
+        case $out in
+            [0-9a-f][0-9a-f][0-9a-f][0-9a-f]*) [ ${#out} -eq 64 ] && { echo "$out"; return 0; } ;;
+        esac
+    done
+    return 1
+}
+
+# AD5X: the images in the AD5X-FS clone the installer keeps (mcu-firmware/ad5x), flashed by
+# ad5x-mcu-flash: the mainboard and the IFS live, the eboard at the next power cycle
+if [ "${OC_MACHINE:-}" = AD5X ]; then
+    IMG=$DEMO_ROOT$OC_HOME/opencreator-fs/mcu-firmware/ad5x
+    TOOL=$DEMO_ROOT$OC_HOME/mcu-flash/ad5x-mcu-flash
+    [ -d "$IMG" ] || { echo "STAGE No AD5X MCU firmware images in $IMG, skipping"; exit 0; }
+    [ -f "$IMG/SHA256SUMS" ] || die "missing $IMG/SHA256SUMS"
+    echo "STAGE Verifying the AD5X MCU firmware images"
+    while read -r expected name; do
+        name=${name#\*}
+        [ -n "$name" ] || continue
+        actual=$(sha256_of "$IMG/$name") || die "no working sha256 tool to check $name"
+        [ "$actual" = "$expected" ] || die "checksum mismatch for $name"
+    done < "$IMG/SHA256SUMS"
+    VER=$(head -n 1 "$IMG/VERSION" 2>/dev/null | tr -d '\r')
+    [ -n "$VER" ] || die "could not read $IMG/VERSION"
+    reported=$(curl -s -m 5 "http://127.0.0.1:7125/printer/objects/query?mcu=mcu_version&mcu%20eboard=mcu_version&mcu%20ifs=mcu_version" 2>/dev/null |
+        grep -o '"mcu_version": *"[^"]*"' | sed 's/.*"\([^"]*\)"$/\1/')
+    if [ -z "$DEMO_ROOT" ] && [ "$(printf '%s\n' "$reported" | grep -c .)" -eq 3 ] &&
+        [ "$(printf '%s\n' "$reported" | grep -c -- "-g$VER")" -eq 3 ]; then
+        echo "STAGE All three boards report $VER, skipping"
+        exit 0
+    fi
+    if [ -n "$DEMO_ROOT" ]; then
+        echo "STAGE Demo mode: would flash $VER with $TOOL"
+        exit 0
+    fi
+    [ -f "$TOOL" ] || die "missing $TOOL"
+    echo "STAGE Flashing the AD5X MCU firmware ($VER)"
+    /bin/sh "$TOOL" "$IMG" || die "flashing failed; see /usr/data/logs/mcu-flash.log"
+    echo "STAGE The eboard is flashed at the next power cycle (switch the printer off and on)"
+    exit 0
+fi
 
 if [ ! -d "$FW_DIR" ]; then
     echo "STAGE No MCU firmware payload staged, skipping"
@@ -71,22 +123,6 @@ MANIFEST="$PKG.manifest.json"
 echo "STAGE Verifying MCU firmware package checksum"
 PKG_NAME=$(basename "$PKG")
 expected=$(cut -d' ' -f1 < "$SHA_SIDECAR" | tr -d '\r' | tr 'A-F' 'a-f')
-# The first tool that prints a real hash wins: a sha256sum on PATH can be a
-# broken link or applet left by another mod.
-sha256_of() {
-    for tool in sha256sum "busybox sha256sum" /opt/bin/sha256sum ff-openssl openssl; do
-        case $tool in
-            ff-openssl) out=$(LD_LIBRARY_PATH=/usr/prog/openssl-1.0.2d/lib \
-                /usr/prog/openssl-1.0.2d/bin/openssl dgst -sha256 < "$1" 2>/dev/null | sed 's/^.*= *//') ;;
-            openssl) out=$(openssl dgst -sha256 < "$1" 2>/dev/null | sed 's/^.*= *//') ;;
-            *) out=$($tool < "$1" 2>/dev/null | cut -d' ' -f1) ;;
-        esac
-        case $out in
-            [0-9a-f][0-9a-f][0-9a-f][0-9a-f]*) [ ${#out} -eq 64 ] && { echo "$out"; return 0; } ;;
-        esac
-    done
-    return 1
-}
 if ! actual=$(sha256_of "$PKG"); then
     [ "$IGNORE_SUM" = 1 ] || { echo "MCUFORCE"; die "no working sha256 tool to check $PKG_NAME"; }
     echo "WARN No sha256 tool; flashing $PKG_NAME after checking the files inside"
@@ -104,32 +140,6 @@ elif [ "$actual" != "$expected" ]; then
     die "checksum mismatch for $PKG_NAME: the file on the USB drive is damaged; extract the release zip to the drive again"
 fi
 
-# AD5X packages (ad5x-update-creator) are stock-format: FlashForge's own
-# app_startup.sh installs the control part at the next power-on and flashes
-# the three boards on the power-on after that, in the eboard's bootloader
-# window. Stage the package and let the installer's final reboot be the
-# first of the two power cycles.
-if [ "$OC_MACHINE" = AD5X ]; then
-    VER=$(sed -n 's/.*"kalico_version": *"\([0-9a-f]\{7,40\}\)".*/\1/p' "$MANIFEST" | head -n 1)
-    [ -n "$VER" ] || die "could not read kalico_version from $MANIFEST"
-    reported=$(curl -s -m 5 "http://127.0.0.1:7125/printer/objects/query?mcu=mcu_version&mcu%20eboard=mcu_version&mcu%20ifs=mcu_version" 2>/dev/null |
-        grep -o '"mcu_version": *"[^"]*"' | sed 's/.*"\([^"]*\)"$/\1/')
-    if [ -z "$DEMO_ROOT" ] && [ "$(printf '%s\n' "$reported" | grep -c .)" -eq 3 ] &&
-        [ "$(printf '%s\n' "$reported" | grep -c -- "-g$VER")" -eq 3 ]; then
-        echo "STAGE All three boards report $VER, skipping"
-        exit 0
-    fi
-    mkdir -p "$DEMO_ROOT/usr/data"
-    cp "$PKG" "$DEMO_ROOT/usr/data/" || die "cannot stage $PKG_NAME in /usr/data"
-    sync
-    if [ -n "$DEMO_ROOT" ]; then
-        echo "STAGE Demo mode: staged $PKG_NAME for FlashForge's updater"
-        exit 0
-    fi
-    echo "STAGE $PKG_NAME staged in /usr/data: FlashForge's updater installs it at the next"
-    echo "STAGE power-on and flashes the boards on the power-on after that (two power cycles)"
-    exit 0
-fi
 
 COMMIT=$(sed -n 's/.*"commit": *"\([0-9a-f]\{7,40\}\)".*/\1/p' "$MANIFEST" | head -n 1)
 [ -n "$COMMIT" ] || die "could not read repository.commit from $MANIFEST"
