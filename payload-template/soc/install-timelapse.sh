@@ -9,7 +9,12 @@ DEMO_ROOT=${OC_DEMO_ROOT:-}
 
 TIMELAPSE_REPO=${TIMELAPSE_REPO:-https://github.com/mainsail-crew/moonraker-timelapse.git}
 TL=$DEMO_ROOT$OC_HOME/moonraker-timelapse
-MR=$DEMO_ROOT/usr/prog/moonraker
+# where Moonraker keeps its components: the AD5X package puts Moonraker in the openad5x folder
+if [ "${OC_MACHINE:-}" = AD5X ]; then
+    COMPONENTS=$DEMO_ROOT$OC_HOME/moonraker/moonraker/components
+else
+    COMPONENTS=$DEMO_ROOT/usr/prog/moonraker/moonraker/moonraker/components
+fi
 CONFIG=$DEMO_ROOT$OC_HOME/klipper/config
 MOONRAKER_CONF=$CONFIG/moonraker.conf
 OUT=$OC_HOME/timelapse
@@ -29,15 +34,17 @@ else
     oc_git_clone_shallow "$TIMELAPSE_REPO" "$TL" || die "cannot download moonraker-timelapse"
 fi
 
-[ -d "$MR/moonraker/moonraker/components" ] || die "Moonraker is not installed"
-ln -sf "$TL/component/timelapse.py" "$MR/moonraker/moonraker/components/timelapse.py"
+[ -d "$COMPONENTS" ] || die "Moonraker is not installed ($COMPONENTS)"
+ln -sf "$TL/component/timelapse.py" "$COMPONENTS/timelapse.py"
 mkdir -p "$CONFIG"
 ln -sf "$TL/klipper_macro/timelapse.cfg" "$CONFIG/timelapse.cfg"
 mkdir -p "$DEMO_ROOT$OUT/frames"
 
 # FlashForge's ffmpeg (with libx264) needs its library folders; renders run
 # at the lowest priority so they never hold up Klipper.
+# FlashForge ships its own ffmpeg: ffmpeg-402 on the Creator 5, ffmpeg-4.0.2 on the AD5X
 FF=/usr/prog/ffmpeg-402
+[ "${OC_MACHINE:-}" != AD5X ] || FF=/usr/prog/ffmpeg-4.0.2
 FFMPEG=$DEMO_ROOT$OUT/ffmpeg
 if [ -z "$DEMO_ROOT" ] && [ ! -x "$FF/bin/ffmpeg" ] && [ ! -x /opt/bin/ffmpeg ]; then
     echo "STAGE Installing ffmpeg (this takes a while)"
