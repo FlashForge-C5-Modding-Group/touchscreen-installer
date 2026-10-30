@@ -12,6 +12,10 @@ MAINSAIL_DIR="$DEMO_ROOT/usr/data/mainsail"
 FLUIDD_DIR="$DEMO_ROOT/usr/data/fluidd"
 NGINX=$DEMO_ROOT/usr/data/nginx
 SITE=$NGINX/sites-available/mainsail
+# The AD5X has no nginx of its own: Entware's, with the config 25-nginx.sh starts
+if [ "${OC_MACHINE:-}" = AD5X ]; then
+    SITE=$DEMO_ROOT$OC_HOME/nginx/nginx.conf
+fi
 
 die() { echo "ERROR $*"; exit 1; }
 
@@ -50,6 +54,11 @@ else
     echo "STAGE Fluidd installed to $FLUIDD_DIR"
 fi
 
+if [ "${OC_MACHINE:-}" = AD5X ] && [ -z "$DEMO_ROOT" ] && [ ! -x /opt/sbin/nginx ]; then
+    echo "STAGE Installing nginx from Entware"
+    /opt/bin/opkg install nginx-ssl || die "cannot install nginx from Entware"
+fi
+
 if [ ! -f "$SITE" ]; then
     [ -n "$DEMO_ROOT" ] || die "nginx site $SITE missing"
     mkdir -p "$(dirname "$SITE")"
@@ -57,8 +66,10 @@ if [ ! -f "$SITE" ]; then
 fi
 sed -i "s#^\([[:space:]]*root[[:space:]]\).*;#\1$WEB_ROOT;#" "$SITE"
 grep -q "root $WEB_ROOT;" "$SITE" || die "could not set the nginx web root in $SITE"
-mkdir -p "$NGINX/sites-enabled"
-ln -sf /usr/data/nginx/sites-available/mainsail "$NGINX/sites-enabled/mainsail"
+if [ "${OC_MACHINE:-}" != AD5X ]; then
+    mkdir -p "$NGINX/sites-enabled"
+    ln -sf /usr/data/nginx/sites-available/mainsail "$NGINX/sites-enabled/mainsail"
+fi
 
 # A kept, older moonraker.conf may lack an update section for one of the UIs.
 MOONRAKER_CONF=$DEMO_ROOT/usr/data/opencreator/klipper/config/moonraker.conf

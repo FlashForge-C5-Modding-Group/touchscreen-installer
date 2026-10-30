@@ -9,7 +9,7 @@ set -eu
 DEMO_ROOT=${OC_DEMO_ROOT:-}
 . "$OC_PAYLOAD/common/install-helpers.sh"
 
-OC=$DEMO_ROOT/usr/data/opencreator/klipper
+OC=$DEMO_ROOT$OC_HOME/klipper
 PYHF=$DEMO_ROOT/usr/data/python-hf
 # The AD5X runs its own Kalico fork (N32G45x boards, half-duplex RS485 IFS)
 if [ "${OC_MACHINE:-}" = AD5X ]; then
@@ -114,7 +114,6 @@ oc_swap_off
 
 echo "STAGE Installing the OpenCreator printer config"
 TEMPLATE=$WORK/opencreator-fs/fs/usr/data/config
-[ "${OC_MACHINE:-}" != AD5X ] || TEMPLATE=$WORK/opencreator-fs/fs/usr/data/config-ad5x
 mkdir -p "$OC/config" "$OC/logs"
 (cd "$TEMPLATE" && find . -type d) | while IFS= read -r dir; do
     mkdir -p "$OC/config/$dir"
