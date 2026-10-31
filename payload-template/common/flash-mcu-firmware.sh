@@ -70,7 +70,7 @@ if [ "${OC_MACHINE:-}" = AD5X ]; then
     fi
     [ -f "$TOOL" ] || die "missing $TOOL"
     echo "STAGE Flashing the AD5X MCU firmware ($VER)"
-    /bin/sh "$TOOL" "$IMG" || die "flashing failed; see /usr/data/logs/mcu-flash.log"
+    /bin/sh "$TOOL" "$IMG" || echo "STAGE Warning: some boards did not flash; see /usr/data/logs/mcu-flash.log"
     echo "STAGE The eboard is flashed at the next power cycle (switch the printer off and on)"
     exit 0
 fi

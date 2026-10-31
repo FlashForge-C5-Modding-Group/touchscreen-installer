@@ -205,6 +205,13 @@ wifi_connect() {
     until online || [ $i -ge 15 ]; do sleep 2; i=$((i + 1)); done
     online || { wpa reconfigure >/dev/null; die "Joined $ssid but there is no internet through it"; }
     wpa save_config >/dev/null || warn "Connected, but the Wi-Fi settings could not be saved"
+    # AD5X: the launcher only starts Wi-Fi at boot when the printer's network settings say so
+    AD5X_CFG=$DEMO_ROOT/usr/prog/config/Adventurer5M.json
+    if [ "$early_machine" = AD5X ] && [ -f "$AD5X_CFG" ]; then
+        sed -i -e 's/\("wifiStationStatus" *: *\)false/\1true/' \
+            -e 's/\("wifiHotspotStatus" *: *\)true/\1false/' "$AD5X_CFG" ||
+            warn "Connected, but the printer's network settings could not be updated"
+    fi
     set_clock
     stage "Connected to $ssid"
 }
