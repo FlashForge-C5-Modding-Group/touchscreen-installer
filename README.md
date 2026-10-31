@@ -357,9 +357,37 @@ launch. Only then does it replace the original, and it is set to `chmod 777`
 and checked again. The original is kept as `app_startup.sh.opencreator-legacy`
 and in the backup. `/usr/prog/scripts/` itself is left in place.
 
-This only runs on a new install. An update over an existing OpenCreator install
-(and Update Configs) never reads or changes `app_startup.sh`: the first
-install already handled it.
+Activation also checks for the legacy start line on updates, including when
+`app_startup.sh` was recovered from `.opencreator-legacy` by the installer or
+activation itself. Already-sanitized startup scripts are left unchanged.
+
+If `app_startup.sh` is missing and `.opencreator-legacy` exists, the shared
+`common/recover-app-startup.sh` helper copies the backup to a temporary file
+beside startup, checks the copy, shell syntax, USB/firmware hooks, and executable
+permissions, then renames it into place. Recovery command failures explicitly
+fail the backend operation, including during conditional model detection; a
+partial recovery copy is never published as startup.
+
+Recovery runs during model detection (including Check), before backups, between
+install and Update Configs steps, and at restore checkpoints. If OpenCreator is
+active, the recovered copy disables the old legacy launcher before publication.
+The installer remembers successful activation even if a later step loses the
+launcher source. With stock ELF firmware active, recovery preserves the original
+legacy script instead, even if an old install record remains. Restore selects
+recovery after its firmware step, or on exit after an earlier failure, so it uses
+the launcher actually left on disk. Older `absent.list` entries cannot delete
+startup. Recovery does not replace an existing regular startup file.
+Install and Update Configs require an executable regular startup file before
+writing their successful completion record, even if no recovery backup exists.
+
+This is not a power-loss guarantee or repair for an already-corrupted startup.
+It requires a usable legacy backup and writable storage. The USB boot hook logs
+recovery failures but still returns control to the stock boot sequence.
+
+Run `sh tests/test_app_startup_safety.sh` on a Linux checkout to exercise startup
+recovery, activation failure cleanup, failed copies, update/reconfigure handling,
+stock restore ordering, and a backup/restore round trip without network access
+or printer hardware.
 
 ## Stock calibration import
 
