@@ -30,7 +30,7 @@ rm -rf "$PYHF.new" "$PYHF.unpack"
 
 if [ "$(cat "$PYHF/.bundle-url" 2>/dev/null)" = "$PYTHON_HF_URL" ] &&
     "$PYHF/bin/python3.13" -c "$CHECK" 2>/dev/null; then
-    echo "STAGE Hard-float Python is up to date"
+    echo "STAGE $PYCAP is up to date"
     exit 0
 fi
 
@@ -44,7 +44,7 @@ rollback() {
 }
 trap 'rc=$?; rm -rf "$WORK"; [ $rc -eq 0 ] || rollback' EXIT
 
-echo "STAGE Downloading hard-float Python"
+echo "STAGE Downloading $PYNAME"
 # The release zip holds python-hf-c5.tar.gz and its .sha256.
 oc_download "$PYTHON_HF_URL" "$WORK/python-hf.zip" || die "cannot download $PYTHON_HF_URL"
 unzip -oq "$WORK/python-hf.zip" -d "$WORK" || die "cannot unzip python-hf"
@@ -56,7 +56,7 @@ if [ -f "$BUNDLE.sha256" ]; then
         || die "python-hf-c5.tar.gz is damaged"
 fi
 
-echo "STAGE Installing hard-float Python"
+echo "STAGE Installing $PYNAME"
 mkdir -p "$PYHF.unpack"
 gunzip -c "$BUNDLE" | tar -xf - -C "$PYHF.unpack" || die "cannot unpack python-hf"
 rm -f "$BUNDLE"
@@ -65,8 +65,8 @@ echo "$PYTHON_HF_URL" > "$PYHF.new/.bundle-url"
 rm -rf "$PYHF.unpack" "$PYHF.old"
 [ ! -d "$PYHF" ] || mv "$PYHF" "$PYHF.old"
 mv "$PYHF.new" "$PYHF"
-"$PYHF/bin/python3.13" -c "$CHECK" || die "hard-float Python does not run on this printer"
+"$PYHF/bin/python3.13" -c "$CHECK" || die "$PYNAME does not run on this printer"
 rm -rf "$PYHF.old"
 trap 'rm -rf "$WORK"' EXIT
 sync
-echo "STAGE Hard-float Python installed"
+echo "STAGE $PYCAP installed"

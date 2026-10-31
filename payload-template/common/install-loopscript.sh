@@ -53,10 +53,11 @@ chmod 755 "$OCDIR/startup/startup.sh" "$OCDIR"/startup/scripts/*.sh "$OCDIR/firm
 [ ! -d "$FS/nginx/conf.d" ] || \
     oc_overlay "$FS/nginx/conf.d" "$NGINX_CONF_D" "$OCDIR/.installed/nginx-conf.d.md5"
 
-# the AD5X fs ships no default grumpyscreen.cfg; the grumpy-ff release has one
-if [ "$TOUCHSCREEN" = yes ] && [ ! -f "$GRUMPY_DIR/grumpyscreen.cfg" ] &&
-    [ -f "$FS/grumpyscreen/grumpyscreen.cfg" ]; then
+# A config missing a [theme] colour draws magenta; it is replaced by the shipped one (kept as .old)
+if [ "$TOUCHSCREEN" = yes ] && [ -f "$FS/grumpyscreen/grumpyscreen.cfg" ] &&
+    ! grep -q '^info_colour:' "$GRUMPY_DIR/grumpyscreen.cfg" 2>/dev/null; then
     mkdir -p "$GRUMPY_DIR"
+    [ ! -f "$GRUMPY_DIR/grumpyscreen.cfg" ] || mv "$GRUMPY_DIR/grumpyscreen.cfg" "$GRUMPY_DIR/grumpyscreen.cfg.old"
     cp "$FS/grumpyscreen/grumpyscreen.cfg" "$GRUMPY_DIR/grumpyscreen.cfg"
 fi
 

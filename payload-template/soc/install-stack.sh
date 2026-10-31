@@ -81,7 +81,7 @@ if [ -n "$DEMO_ROOT" ]; then
     echo "STAGE Demo mode: would create $OC/klippy-env with python-hf -m venv" \
          "--without-pip --system-site-packages and build klippy/chelper"
 else
-    [ -x "$PYHF/bin/python3.13" ] || die "hard-float Python is not installed"
+    [ -x "$PYHF/bin/python3.13" ] || die "$PYNAME is not installed"
     if grep -qx "home = /usr/data/python-hf/bin" "$OC/klippy-env/pyvenv.cfg" 2>/dev/null; then
         echo "STAGE Kalico's Python environment is up to date"
     else

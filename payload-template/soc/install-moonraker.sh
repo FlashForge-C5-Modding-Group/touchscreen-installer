@@ -111,9 +111,9 @@ if [ -n "$DEMO_ROOT" ]; then
     echo "STAGE Demo mode: would create $MR/moonraker-env with python-hf -m venv" \
          "--system-site-packages and install scripts/moonraker-requirements.txt"
 else
-    [ -x "$PYHF/bin/python3.13" ] || die "hard-float Python is not installed"
+    [ -x "$PYHF/bin/python3.13" ] || die "$PYNAME is not installed"
     if grep -qx "home = /usr/data/python-hf/bin" "$MR/moonraker-env/pyvenv.cfg" 2>/dev/null; then
-        echo "STAGE Moonraker's Python environment is on hard-float Python"
+        echo "STAGE Moonraker's Python environment is on the $PYNAME"
     else
         echo "STAGE Creating Moonraker's Python environment"
         [ ! -d "$MR/moonraker-env" ] || mv "$MR/moonraker-env" "$MR/moonraker-env.old"

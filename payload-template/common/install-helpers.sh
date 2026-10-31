@@ -2,6 +2,15 @@
 # a downloaded GitHub release asset, and progress for long commands.
 # Sourced (". install-helpers.sh"), not executed.
 
+# What the installer calls the Python it installs
+if [ "${OC_MACHINE:-}" = AD5X ]; then
+    PYNAME="updated Python"
+    PYCAP="Updated Python"
+else
+    PYNAME="hard-float Python"
+    PYCAP="Hard-float Python"
+fi
+
 # The folder the installed files live in
 if [ "${OC_MACHINE:-}" = AD5X ]; then
     OC_HOME=/usr/data/openad5x
