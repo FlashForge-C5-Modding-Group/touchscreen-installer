@@ -22,11 +22,6 @@ cp -R "$ROOT/payload-template/." "$OUT/opencreator/payload/"
 for pkg in ${MCU_PACKAGE:-}; do
     cp "$pkg" "$pkg.sha256" "$pkg.manifest.json" "$OUT/opencreator/payload/mcu-firmware/"
 done
-# AD5X: the Python built for it, with its .sha256 (PYTHON_PACKAGE="ad5x-python-X.tar.gz")
-for pkg in ${PYTHON_PACKAGE:-}; do
-    mkdir -p "$OUT/opencreator/payload/python"
-    cp "$pkg" "$pkg.sha256" "$OUT/opencreator/payload/python/"
-done
 # The printer's busybox sh cannot run CRLF scripts.
 find "$OUT" -name '*.sh' -exec sed -i 's/\r$//' {} +
 

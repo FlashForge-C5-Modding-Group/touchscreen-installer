@@ -11,7 +11,7 @@ TIMELAPSE_REPO=${TIMELAPSE_REPO:-https://github.com/mainsail-crew/moonraker-time
 TL=$DEMO_ROOT$OC_HOME/moonraker-timelapse
 # where Moonraker keeps its components: the AD5X package puts Moonraker in the openad5x folder
 if [ "${OC_MACHINE:-}" = AD5X ]; then
-    COMPONENTS=$DEMO_ROOT$OC_HOME/moonraker/moonraker/components
+    COMPONENTS=$DEMO_ROOT$OC_HOME/moonraker/moonraker/moonraker/components
 else
     COMPONENTS=$DEMO_ROOT/usr/prog/moonraker/moonraker/moonraker/components
 fi

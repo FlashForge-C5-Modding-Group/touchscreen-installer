@@ -21,14 +21,18 @@ destination="$DEMO_ROOT/usr/data/grumpyscreen"
 
 die() { echo "ERROR $*"; exit 1; }
 
-url=$(oc_github_latest_asset_url "$REPO" "$ASSET")
+if [ "${OC_MACHINE:-}" = AD5X ]; then
+    # the build tested on the AD5X; newer ones are not checked there
+    url=https://github.com/$REPO/releases/download/${OC_GRUMPY_TAG:-v2.0.0-323-ff}/$ASSET
+else
+    url=$(oc_github_latest_asset_url "$REPO" "$ASSET")
+fi
 [ -n "$url" ] || die "could not find a $ASSET release asset for $REPO"
 
 tag=$(basename "$(dirname "$url")")
 mkdir -p "$destination"
 if [ -f "$destination/grumpyscreen" ] &&
-    grep -q "\"version\": \"$tag\"" "$destination/release_info.json" 2>/dev/null &&
-    { [ "${OC_MACHINE:-}" != AD5X ] || grep -q '^\[theme\]' "$destination/grumpyscreen.cfg" 2>/dev/null; }; then
+    grep -q "\"version\": \"$tag\"" "$destination/release_info.json" 2>/dev/null; then
     echo "STAGE GrumpyScreen $tag already installed"
 else
     if [ -f "$destination/grumpyscreen" ]; then
@@ -56,11 +60,6 @@ else
         # keep an existing config (40-grumpyscreen.sh sets the AD5X bits)
         [ -f "$destination/grumpyscreen.cfg" ] || \
             cp "$destination/unpack/grumpyscreen/grumpyscreen.cfg" "$destination/grumpyscreen.cfg" 2>/dev/null || true
-        # the release has no built-in colours: a config from an older release needs its [theme] section
-        if ! grep -q '^\[theme\]' "$destination/grumpyscreen.cfg" 2>/dev/null; then
-            { echo; sed -n '/^\[theme\]/,/^\[/{/^\[theme\]/p;/^\[/!p}' "$destination/unpack/grumpyscreen/grumpyscreen.cfg"; } \
-                >> "$destination/grumpyscreen.cfg"
-        fi
         rm -rf "$destination/unpack"
     else
         oc_download "$url" "$destination/grumpyscreen.new"
