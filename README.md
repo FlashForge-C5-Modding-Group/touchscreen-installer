@@ -187,6 +187,9 @@ the detected package; demo installs default to 2.0.7. In the SDL demo,
 - **Log viewer**: the Log button (top right) shows all backend output. The
   same output is appended, timestamped, to `BACKUP_DIR/opencreator-installer.log`
   (or `/tmp/opencreator-installer.log` if that is not writable).
+- **Reinstall notice**: when `firmwareExe` is back to stock on a printer that
+  has had OpenCreator, the installer says it will reinstall and goes to the full
+  install, as an update wouldn't bring the launcher back.
 - **Restore backup**: when a previous OpenCreator backup exists (the one in
   `install.json`, otherwise the newest `BACKUP_DIR/opencreator-*`), the mode
   page and the error page after a failed install offer to restore it. Folders

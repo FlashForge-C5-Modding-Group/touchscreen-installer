@@ -32,8 +32,8 @@ if [ -z "$DEMO_ROOT" ]; then
 fi
 STATE_DIR=${OC_STATE_DIR:-"$DEMO_ROOT/usr/data/opencreator"}
 INSTALL_STATE=$STATE_DIR/install.json
-INSTALLER_VERSION=0.0.6
-INSTALLER_RELEASE="Public Alpha 5"
+INSTALLER_VERSION=0.0.7
+INSTALLER_RELEASE="Public Alpha 6"
 MIN_FREE_KB=${OC_MIN_FREE_KB:-262144}
 BACKUP_FOLDERS="usr/prog/PROGRAM/software/firmwareExe usr/prog/moonraker usr/data/opencreator
 usr/data/mainsail usr/data/fluidd usr/data/nginx usr/prog/c5-tunnel-socat
@@ -372,6 +372,15 @@ check() {
     if [ -f "$fe" ] && [ "$(dd if="$fe" bs=1 skip=1 count=3 2>/dev/null)" != ELF ] &&
         stock=$(stock_firmware_exe); then
         printf 'STOCK %s\n' "$stock"
+    fi
+    # Stock firmwareExe on a printer that has had OpenCreator (a rollback or a
+    # FlashForge update): an update wouldn't bring the launcher back, so the
+    # app sends this to a full install. After PREVIOUS, which this overrides.
+    if [ -f "$fe" ] && [ "$(dd if="$fe" bs=1 skip=1 count=3 2>/dev/null)" = ELF ] &&
+        { [ -f "$INSTALL_STATE" ] || [ -f "$INSTALL_STATE.rolled-back" ] ||
+          [ -f "$STATE_DIR/firmwareExe.stock" ]; }; then
+        printf 'REVERTED\n'
+        warn "firmwareExe is back to stock, so OpenCreator is not running. Continuing will reinstall OpenCreator."
     fi
 }
 backup_folders() {

@@ -53,7 +53,7 @@ pids_of() {
     done
     return 0
 }
-STREAM=$(pids_of 'mjpg_streamer -i')
+STREAM="$(pids_of 'mjpg_streamer -i') $(pids_of 'ustreamer --device')"
 LOOPS=
 for p in $STREAM; do LOOPS="$LOOPS $(awk '{print $4}' "/proc/$p/stat" 2>/dev/null)"; done
 resume() { [ -z "${LOOPS# }" ] || kill -CONT $LOOPS 2>/dev/null || true; }

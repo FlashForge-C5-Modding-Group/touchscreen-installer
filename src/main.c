@@ -470,8 +470,10 @@ static void action_button(lv_event_t *event)
     } else if (strcmp(action, "install-force-mcu") == 0) {
         /* Same choices and backup setting as the run that stopped. */
         force_mcu = true; start_action("install");
+#ifdef OC_DEMO
     } else if (strcmp(action, "demo-install") == 0) {
         demo_root = OC_DEMO_INSTALL_ROOT; unsetenv("OC_SKIP_BACKUP"); start_action("install");
+#endif
     } else if (strcmp(action, "update") == 0 || strcmp(action, "update-nobackup") == 0) {
         /* Same setup as the install record, no questions asked. */
         mode = prev_mode; web = prev_web; touchscreen = prev_touch;
@@ -1108,6 +1110,8 @@ static void process_line(char *line)
                       strcmp(prev_web, "mainsail") == 0);
         installed_same = valid && strcmp(prev_version, installer_version) == 0;
         update_available = valid && !installed_same;
+    } else if (strcmp(line, "REVERTED") == 0) {
+        installed_same = update_available = false;
     } else if (strcmp(line, "MCUFORCE") == 0) {
         mcu_forceable = true;
     } else if (strncmp(line, "SPACE LOW ", 10) == 0) {
