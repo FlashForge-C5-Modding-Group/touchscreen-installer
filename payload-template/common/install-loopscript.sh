@@ -29,10 +29,10 @@ FS=$WORK/opencreator-fs/fs/usr/data
 # SoC: the clone stays for Moonraker's [update_manager opencreator], which
 # 99-opencreator-updater.sh merges config updates from.
 if [ "${OC_MODE:-}" = soc ]; then
-    rm -rf "$OCDIR/opencreator-fs"
+    rm -rf "$OCDIR/opencreator-fs" "$OCDIR/$OC_FS_DIR"
     mkdir -p "$OCDIR"
-    mv "$WORK/opencreator-fs" "$OCDIR/opencreator-fs"
-    FS=$OCDIR/opencreator-fs/fs/usr/data
+    mv "$WORK/opencreator-fs" "$OCDIR/$OC_FS_DIR"
+    FS=$OCDIR/$OC_FS_DIR/fs/usr/data
 fi
 
 echo "STAGE Installing LoopScript"

@@ -105,9 +105,11 @@ if [ -f "$MOONRAKER_CONF" ]; then
     fi
     if ! grep -q "^\[update_manager $FS_SECTION\]" "$MOONRAKER_CONF"; then
         echo "STAGE Adding the $FS_SECTION configs to Moonraker's update manager"
-        printf '\n[update_manager %s]\ntype: git_repo\npath: %s/opencreator-fs\norigin: %s\nprimary_branch: main\nis_system_service: False\n' \
-            "$FS_SECTION" "$OC_HOME" "$FS_ORIGIN" >> "$MOONRAKER_CONF"
+        printf '\n[update_manager %s]\ntype: git_repo\npath: %s/%s\norigin: %s\nprimary_branch: main\nis_system_service: False\n' \
+            "$FS_SECTION" "$OC_HOME" "$OC_FS_DIR" "$FS_ORIGIN" >> "$MOONRAKER_CONF"
     fi
+    # an entry from before the folder was renamed
+    sed -i "s|^path: $OC_HOME/opencreator-fs\$|path: $OC_HOME/$OC_FS_DIR|" "$MOONRAKER_CONF"
 fi
 sync
 echo "STAGE nginx serves $WEB_UI on port 80"

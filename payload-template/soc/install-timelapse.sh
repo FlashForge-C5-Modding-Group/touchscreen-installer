@@ -9,12 +9,7 @@ DEMO_ROOT=${OC_DEMO_ROOT:-}
 
 TIMELAPSE_REPO=${TIMELAPSE_REPO:-https://github.com/mainsail-crew/moonraker-timelapse.git}
 TL=$DEMO_ROOT$OC_HOME/moonraker-timelapse
-# where Moonraker keeps its components: the AD5X package puts Moonraker in the openad5x folder
-if [ "${OC_MACHINE:-}" = AD5X ]; then
-    COMPONENTS=$DEMO_ROOT$OC_HOME/moonraker/moonraker/moonraker/components
-else
-    COMPONENTS=$DEMO_ROOT/usr/prog/moonraker/moonraker/moonraker/components
-fi
+COMPONENTS=$DEMO_ROOT/usr/prog/moonraker/moonraker/moonraker/components
 CONFIG=$DEMO_ROOT$OC_HOME/klipper/config
 MOONRAKER_CONF=$CONFIG/moonraker.conf
 OUT=$OC_HOME/timelapse

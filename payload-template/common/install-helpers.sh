@@ -14,8 +14,10 @@ fi
 # The folder the installed files live in
 if [ "${OC_MACHINE:-}" = AD5X ]; then
     OC_HOME=/usr/data/openad5x
+    OC_FS_DIR=ad5x-fs
 else
     OC_HOME=/usr/data/opencreator
+    OC_FS_DIR=opencreator-fs
 fi
 
 # oc_git_clone_shallow URL DEST [BRANCH]

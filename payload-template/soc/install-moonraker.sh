@@ -10,12 +10,16 @@ DEMO_ROOT=${OC_DEMO_ROOT:-}
 . "$OC_PAYLOAD/common/install-helpers.sh"
 
 MR=$DEMO_ROOT/usr/prog/moonraker
-# the AD5X's /usr/prog is a 1 GB partition that FlashForge's files nearly fill
-[ "${OC_MACHINE:-}" != AD5X ] || MR=$DEMO_ROOT$OC_HOME/moonraker
 PYHF=$DEMO_ROOT/usr/data/python-hf
 MOONRAKER_REPO=https://github.com/Arksine/moonraker.git
 
 die() { echo "ERROR $*"; exit 1; }
+
+# The AD5X's /usr/prog is a 1 GB partition that FlashForge's files nearly fill
+if [ "${OC_MACHINE:-}" = AD5X ] && [ -z "$DEMO_ROOT" ] && [ ! -d "$MR/moonraker-env" ]; then
+    free=$(df -k /usr/prog | tail -n 1 | awk '{print $(NF-2)}')
+    [ "${free:-0}" -ge 204800 ] || die "not enough room in /usr/prog for Moonraker: $((${free:-0} / 1024)) MB free, 200 MB needed"
+fi
 
 if [ -z "$DEMO_ROOT" ] && [ -x /usr/prog/klipper/moonrakerDaemon ]; then
     echo "STAGE Stopping the stock Moonraker"

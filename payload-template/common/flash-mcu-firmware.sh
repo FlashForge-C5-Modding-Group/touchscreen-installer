@@ -44,7 +44,7 @@ IGNORE_SUM=${OC_IGNORE_MCU_CHECKSUM:-0}
 # AD5X: the images in the AD5X-FS clone the installer keeps (mcu-firmware/ad5x), flashed by
 # ad5x-mcu-flash: the mainboard and the IFS live, the eboard at the next power cycle
 if [ "${OC_MACHINE:-}" = AD5X ]; then
-    IMG=$DEMO_ROOT$OC_HOME/opencreator-fs/mcu-firmware/ad5x
+    IMG=$DEMO_ROOT$OC_HOME/$OC_FS_DIR/mcu-firmware/ad5x
     TOOL=$DEMO_ROOT$OC_HOME/mcu-flash/ad5x-mcu-flash
     [ -d "$IMG" ] || { echo "STAGE No AD5X MCU firmware images in $IMG, skipping"; exit 0; }
     [ -f "$IMG/SHA256SUMS" ] || die "missing $IMG/SHA256SUMS"
