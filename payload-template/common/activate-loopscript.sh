@@ -12,20 +12,48 @@ die() { echo "ERROR $*"; exit 1; }
 
 [ -f "$OCDIR/firmware/firmwareExe" ] || die "LoopScript is not installed"
 
-# OpenCreator Legacy's LoopScript is started by a line its guide adds to
-# app_startup.sh. That script also runs the USB update check, so a broken
+# OpenCreator Legacy's guide adds start lines to app_startup.sh: its
+# LoopScript, and its webcam followed by "sleep 2". That script also runs the USB update check, so a broken
 # copy bricks the printer: the line is replaced by a no-op (keeping every
 # block valid), and the result is checked before it replaces the original.
 # Also check on updates: recovery may have restored the original legacy entry.
 # Already-sanitized startup scripts are left unchanged.
 APP_STARTUP=$DEMO_ROOT/usr/prog/app_startup.sh
 LEGACY_RE='^[[:space:]]*(sh[[:space:]]+)?/usr/prog/scripts/loop/loop\.sh[[:space:]]*&?[[:space:]]*$'
+WEBCAM_RE='^[[:space:]]*(sh[[:space:]]*)?/usr/prog/mjpg-streamer/start_webcam\.sh[[:space:]]*&?[[:space:]]*$'
+SLEEP_RE='^[[:space:]]*sleep[[:space:]]+2[[:space:]]*;?[[:space:]]*$'
+MARK_RE='^: # OpenCreator: Legacy (LoopScript|webcam start) disabled'
+# legacy_lines count|disable|drop FILE: the legacy LoopScript line and the
+# webcam start line followed by "sleep 2", counted, swapped for no-ops, or left out.
+legacy_lines() {
+    LRE=$LEGACY_RE WRE=$WEBCAM_RE SRE=$SLEEP_RE awk -v mode="$1" '
+        BEGIN { lre = ENVIRON["LRE"]; wre = ENVIRON["WRE"]; sre = ENVIRON["SRE"] }
+        function keep(s) { if (mode != "count") print s }
+        function off(s) { n++; if (mode == "disable") print s }
+        {
+            if (held) {
+                held = 0
+                if ($0 ~ sre) {
+                    off(": # OpenCreator: Legacy webcam start disabled (was " t ")")
+                    off(": # OpenCreator: Legacy webcam start disabled (was sleep 2)")
+                    next
+                }
+                keep(w)
+            }
+            if ($0 ~ lre) { off(": # OpenCreator: Legacy LoopScript disabled (was /usr/prog/scripts/loop/loop.sh &)"); next }
+            if ($0 ~ wre) { held = 1; w = $0; t = $0; sub(/^[[:space:]]+/, "", t); next }
+            keep($0)
+        }
+        END { if (held) keep(w); if (mode == "count") print n + 0 }' "$2"
+}
 # Activation is preparing the current launcher, even before its first install.
 /bin/sh "$OC_PAYLOAD/common/recover-app-startup.sh" opencreator ||
     die "could not recover app_startup.sh before activation"
-if [ -f "$APP_STARTUP" ] && grep -Eq "$LEGACY_RE" "$APP_STARTUP"; then
-    echo "STAGE Disabling the OpenCreator Legacy LoopScript start line"
-    matches=$(grep -Ec "$LEGACY_RE" "$APP_STARTUP" || true)
+matches=0
+[ ! -f "$APP_STARTUP" ] || matches=$(legacy_lines count "$APP_STARTUP") ||
+    die "cannot inspect app_startup.sh"
+if [ "$matches" -gt 0 ]; then
+    echo "STAGE Disabling the OpenCreator Legacy start lines"
     [ -f "$APP_STARTUP.opencreator-legacy" ] || cp -p "$APP_STARTUP" "$APP_STARTUP.opencreator-legacy"
     new=$APP_STARTUP.opencreator-new
     cleanup_and_recover() {
@@ -37,17 +65,15 @@ if [ -f "$APP_STARTUP" ] && grep -Eq "$LEGACY_RE" "$APP_STARTUP"; then
     trap cleanup_and_recover EXIT
     rm -f "$new"
     cp -p "$APP_STARTUP" "$new"
-    marker=': # OpenCreator: Legacy LoopScript disabled'
-    sed -E "s|$LEGACY_RE|$marker (was /usr/prog/scripts/loop/loop.sh \\&)|" \
-        "$APP_STARTUP" > "$new" || { rm -f "$new"; die "could not edit app_startup.sh"; }
+    legacy_lines disable "$APP_STARTUP" > "$new" || { rm -f "$new"; die "could not edit app_startup.sh"; }
     # Every other line must be unchanged, byte for byte.
-    grep -Fv "$marker" "$new" > "$new.after" || true
-    grep -Fv "$marker" "$APP_STARTUP" | grep -Ev "$LEGACY_RE" > "$new.orig" || true
-    added=$(( $(grep -Fc "$marker" "$new" || true) - $(grep -Fc "$marker" "$APP_STARTUP" || true) ))
-    if [ "$(wc -l < "$new")" -ne "$(wc -l < "$APP_STARTUP")" ] ||
+    grep -Ev "$MARK_RE" "$new" > "$new.after" || true
+    legacy_lines drop "$APP_STARTUP" | grep -Ev "$MARK_RE" > "$new.orig" || true
+    added=$(( $(grep -Ec "$MARK_RE" "$new" || true) - $(grep -Ec "$MARK_RE" "$APP_STARTUP" || true) ))
+    if [ "$(awk 'END { print NR }' "$new")" -ne "$(awk 'END { print NR }' "$APP_STARTUP")" ] ||
         [ "$added" -ne "$matches" ] ||
         [ "$(md5sum < "$new.after")" != "$(md5sum < "$new.orig")" ] ||
-        grep -Eq "$LEGACY_RE" "$new" ||
+        [ "$(legacy_lines count "$new")" -ne 0 ] ||
         ! sh -n "$new" ||
         ! grep -q 'runFirmwareExe.sh' "$new" ||
         ! grep -q 'PROGRAM/software/firmwareExe' "$new"; then

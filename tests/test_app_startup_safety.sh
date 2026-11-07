@@ -605,6 +605,42 @@ EOF
 # disable errexit inside them and hide unexpected fixture/command failures.
 # Each independent case runs with errexit in its own subshell instead.
 failures=0
+test_activation_disables_legacy_webcam_start() {
+    root=$TEST_DIR/t19
+    prepare_activation_root "$root"
+    cat <<'EOF' > "$root/usr/prog/app_startup.sh"
+#!/bin/sh
+MACHINE=Creator5
+PID=0028
+if [ -x /usr/prog/mjpg-streamer/start_webcam.sh ]; then
+    sh /usr/prog/mjpg-streamer/start_webcam.sh
+    sleep 2
+fi
+sleep 2
+/usr/prog/mjpg-streamer/start_webcam.sh
+echo kept
+if [ -f /mnt/runFirmwareExe.sh ]; then
+    /mnt/runFirmwareExe.sh
+fi
+/usr/prog/PROGRAM/software/firmwareExe &
+EOF
+    chmod 777 "$root/usr/prog/app_startup.sh"
+    cp "$root/usr/prog/app_startup.sh" "$root/expected"
+    OC_DEMO_ROOT="$root" OC_PAYLOAD="$FIXTURE_PAYLOAD" OC_UPDATE=0 \
+        /bin/sh "$OC_TEST_ACTIVATION"
+    assert_sanitized_startup "$root"
+    startup=$root/usr/prog/app_startup.sh
+    [ "$(grep -c 'webcam start disabled' "$startup")" -eq 2 ] ||
+        fail "the webcam start and its sleep were not both disabled"
+    grep -Eq '^[[:space:]]*sh /usr/prog/mjpg-streamer/start_webcam\.sh$' "$startup" &&
+        fail "the webcam start followed by sleep 2 is still enabled"
+    grep -Fxq 'sleep 2' "$startup" || fail "a sleep 2 not after the webcam start was removed"
+    grep -Fxq '/usr/prog/mjpg-streamer/start_webcam.sh' "$startup" ||
+        fail "a webcam start without sleep 2 after it was removed"
+    [ "$(wc -l < "$startup")" -eq "$(wc -l < "$root/expected")" ] || fail "line count changed"
+    cmp -s "$root/expected" "$startup.opencreator-legacy" || fail "legacy backup differs"
+}
+
 for test_case in \
     test_activation_recovers_missing_startup \
     test_activation_swap_failure_recovers_and_cleans_up \
@@ -623,7 +659,8 @@ for test_case in \
     test_restore_recovers_stock_startup_when_startup_archive_is_absent \
     test_failed_restore_recovers_startup_for_current_opencreator_firmware \
     test_reconfigure_recovers_startup_deleted_by_web_step \
-    test_install_rejects_startup_deleted_without_recovery_backup; do
+    test_install_rejects_startup_deleted_without_recovery_backup \
+    test_activation_disables_legacy_webcam_start; do
     printf '=== Running %s ===\n' "$test_case"
     set +e
     (

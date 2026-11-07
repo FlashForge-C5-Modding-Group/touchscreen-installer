@@ -10,16 +10,38 @@ INSTALL_STATE=${OC_STATE_DIR:-$OCDIR}/install.json
 MODE=${1:-auto}
 REPLACE=${2:-missing}
 LEGACY_RE='^[[:space:]]*(sh[[:space:]]+)?/usr/prog/scripts/loop/loop\.sh[[:space:]]*&?[[:space:]]*$'
+WEBCAM_RE='^[[:space:]]*(sh[[:space:]]*)?/usr/prog/mjpg-streamer/start_webcam\.sh[[:space:]]*&?[[:space:]]*$'
+SLEEP_RE='^[[:space:]]*sleep[[:space:]]+2[[:space:]]*;?[[:space:]]*$'
+MARK_RE='^: # OpenCreator: Legacy (LoopScript|webcam start) disabled'
+# legacy_lines count|disable|drop FILE: the legacy LoopScript line and the
+# webcam start line followed by "sleep 2", counted, swapped for no-ops, or left out.
+legacy_lines() {
+    LRE=$LEGACY_RE WRE=$WEBCAM_RE SRE=$SLEEP_RE awk -v mode="$1" '
+        BEGIN { lre = ENVIRON["LRE"]; wre = ENVIRON["WRE"]; sre = ENVIRON["SRE"] }
+        function keep(s) { if (mode != "count") print s }
+        function off(s) { n++; if (mode == "disable") print s }
+        {
+            if (held) {
+                held = 0
+                if ($0 ~ sre) {
+                    off(": # OpenCreator: Legacy webcam start disabled (was " t ")")
+                    off(": # OpenCreator: Legacy webcam start disabled (was sleep 2)")
+                    next
+                }
+                keep(w)
+            }
+            if ($0 ~ lre) { off(": # OpenCreator: Legacy LoopScript disabled (was /usr/prog/scripts/loop/loop.sh &)"); next }
+            if ($0 ~ wre) { held = 1; w = $0; t = $0; sub(/^[[:space:]]+/, "", t); next }
+            keep($0)
+        }
+        END { if (held) keep(w); if (mode == "count") print n + 0 }' "$2"
+}
 
 die() { echo "ERROR $*"; exit 1; }
 # A read error is not evidence that the legacy launcher is absent.
 has_legacy_line() {
-    if grep -Eq "$LEGACY_RE" "$1"; then
-        return 0
-    else
-        [ "$?" -eq 1 ] || die "cannot inspect the recovered legacy launcher"
-        return 1
-    fi
+    count=$(legacy_lines count "$1") || die "cannot inspect the recovered legacy launcher"
+    [ "$count" -gt 0 ]
 }
 case "$MODE" in auto|opencreator) ;; *) die "invalid startup recovery mode" ;; esac
 case "$REPLACE" in missing|replace) ;; *) die "invalid startup recovery operation" ;; esac
@@ -53,9 +75,7 @@ trap 'rm -f "$candidate"' EXIT
 cp -p "$LEGACY" "$candidate" || die "cannot copy the legacy startup backup"
 cmp -s "$LEGACY" "$candidate" || die "startup recovery copy differs from its backup"
 if [ "$MODE" = opencreator ] && has_legacy_line "$candidate"; then
-    marker=': # OpenCreator: Legacy LoopScript disabled'
-    sed -E "s|$LEGACY_RE|$marker (was /usr/prog/scripts/loop/loop.sh \\&)|" \
-        "$LEGACY" > "$candidate" || die "cannot disable the recovered legacy launcher"
+    legacy_lines disable "$LEGACY" > "$candidate" || die "cannot disable the recovered legacy launcher"
     if has_legacy_line "$candidate"; then
         die "recovered startup still enables the legacy launcher"
     fi

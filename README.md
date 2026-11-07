@@ -397,6 +397,10 @@ launch. Only then does it replace the original, and it is set to `chmod 777`
 and checked again. The original is kept as `app_startup.sh.opencreator-legacy`
 and in the backup. `/usr/prog/scripts/` itself is left in place.
 
+The guide's webcam start, `sh /usr/prog/mjpg-streamer/start_webcam.sh` followed
+by `sleep 2`, is disabled the same way (`: # OpenCreator: Legacy webcam start
+disabled ...`, one for each line). Either line on its own is left alone.
+
 Activation also checks for the legacy start line on updates, including when
 `app_startup.sh` was recovered from `.opencreator-legacy` by the installer or
 activation itself. Already-sanitized startup scripts are left unchanged.
