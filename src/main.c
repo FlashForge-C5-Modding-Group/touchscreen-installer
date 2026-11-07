@@ -17,7 +17,7 @@
 enum page { PAGE_CHECK, PAGE_MODE, PAGE_WEB, PAGE_TOUCHSCREEN, PAGE_READY,
             PAGE_RUNNING, PAGE_DONE, PAGE_ERROR, PAGE_RESTORE, PAGE_KERNEL,
             PAGE_INSTALLED, PAGE_ROLLBACK, PAGE_UPDATE, PAGE_OFFLINE, PAGE_WIFI_PASS,
-            PAGE_TUNNEL_PASS, PAGE_CLEANUP };
+            PAGE_TUNNEL_WARN, PAGE_CLEANUP };
 static enum page page_now;
 static enum page cleanup_from;  /* the page Clean up storage was opened from */
 static const char *payload_path, *backup_path, *script_path;
@@ -68,11 +68,8 @@ static int wifi_count;
 static bool wifi_scanned;
 static char wifi_ssid[64], wifi_error[200], wifi_current[64];
 static lv_obj_t *wifi_list, *wifi_ta, *wifi_kb, *wifi_back, *wifi_button;
-/* Tunneled needs this password, typed on the Wi-Fi keyboard, unless the
- * printer is already tunneled. */
-#define OC_TUNNEL_PASSWORD "You're funny, I am not about to leak the tunneled password yet!"
-static lv_obj_t *tunnel_back;
-static bool tunnel_pass_wrong;
+/* Tunneled asks for this long on its warning, unless already tunneled. */
+#define OC_TUNNEL_WAIT 30
 static char machine[32] = "unknown";
 static bool model_known;
 static char backup_found[512];
@@ -117,6 +114,7 @@ static void step_info(enum page p, int *step, int *total)
     case PAGE_MODE:     *step = 1; break;
     case PAGE_WEB:        *step = 2; break;
     case PAGE_TOUCHSCREEN: *step = soc ? 3 : 2; break;
+    case PAGE_TUNNEL_WARN: *step = 1; break;
     case PAGE_READY:    *step = soc ? 4 : 3; break;
     case PAGE_RUNNING:
     case PAGE_DONE:
@@ -130,6 +128,7 @@ static const char *page_icon(enum page p)
     switch (p) {
     case PAGE_DONE:  return LV_SYMBOL_OK;
     case PAGE_ERROR:
+    case PAGE_TUNNEL_WARN:
     case PAGE_KERNEL: return LV_SYMBOL_WARNING;
     case PAGE_RUNNING: return LV_SYMBOL_DOWNLOAD;
     case PAGE_MODE:  return LV_SYMBOL_SETTINGS;
@@ -142,7 +141,6 @@ static const char *page_icon(enum page p)
     case PAGE_UPDATE: return LV_SYMBOL_UPLOAD;
     case PAGE_OFFLINE:
     case PAGE_WIFI_PASS: return LV_SYMBOL_WIFI;
-    case PAGE_TUNNEL_PASS: return LV_SYMBOL_EYE_CLOSE;
     default:         return LV_SYMBOL_HOME;
     }
 }
@@ -427,18 +425,6 @@ static void wifi_pick(lv_event_t *event)
 static void wifi_keyboard(lv_event_t *event)
 {
     lv_event_code_t code = lv_event_get_code(event);
-    if (page_now == PAGE_TUNNEL_PASS) {
-        if (code == LV_EVENT_CANCEL) show_page(PAGE_MODE);
-        if (code != LV_EVENT_READY) return;
-        if (strcmp(lv_textarea_get_text(wifi_ta), OC_TUNNEL_PASSWORD) == 0) {
-            mode = "tunnel"; web = "none"; show_page(PAGE_TOUCHSCREEN);
-        } else {
-            tunnel_pass_wrong = true;
-            lv_textarea_set_text(wifi_ta, "");
-            show_page(PAGE_TUNNEL_PASS);
-        }
-        return;
-    }
     if (code == LV_EVENT_READY) connect_wifi(lv_textarea_get_text(wifi_ta));
     else if (code == LV_EVENT_CANCEL) show_page(PAGE_OFFLINE);
 }
@@ -453,10 +439,12 @@ static void action_button(lv_event_t *event)
         if (strcmp(prev_mode, "tunnel") == 0) {
             mode = "tunnel"; web = "none"; show_page(PAGE_TOUCHSCREEN);
         } else {
-            tunnel_pass_wrong = false;
-            lv_textarea_set_text(wifi_ta, "");
-            show_page(PAGE_TUNNEL_PASS);
+            show_page(PAGE_TUNNEL_WARN);
         }
+    } else if (strcmp(action, "tunnel-accept") == 0) {
+        mode = "tunnel"; web = "none"; show_page(PAGE_TOUCHSCREEN);
+    } else if (strcmp(action, "tunnel-back") == 0) {
+        show_page(PAGE_MODE);
     } else if (strcmp(action, "mainsail") == 0 || strcmp(action, "fluidd") == 0) {
         web = action; show_page(PAGE_TOUCHSCREEN);
     } else if (strcmp(action, "touch-yes") == 0) {
@@ -545,6 +533,7 @@ static lv_obj_t *make_button(lv_obj_t *parent, const char *text, const char *act
 static lv_obj_t *add_button(const char *text, const char *action)
 {
     bool secondary = strcmp(action, "back") == 0 || strcmp(action, "touch-no") == 0 ||
+                     strcmp(action, "tunnel-back") == 0 ||
                      strcmp(action, "home") == 0 || strcmp(action, "recovery") == 0 ||
                      strcmp(action, "rollback-confirm") == 0 || strcmp(action, "start") == 0 ||
                      strcmp(action, "restore-confirm") == 0 || strcmp(action, "mainsail") == 0 ||
@@ -574,37 +563,61 @@ static void add_summary_row(const char *label, const char *value)
     lv_obj_set_style_pad_bottom(row, 6, 0);
 }
 
-/* "Yes, delete" on the cleanup page only works after a 10 s countdown. */
-#define OC_CLEANUP_WAIT 10
-static lv_timer_t *cleanup_timer;
-static lv_obj_t *cleanup_yes;
-static int cleanup_left;
+/* "Yes, delete" on the cleanup page and "I understand" on the tunneled page
+ * only work after a countdown. */
+#define OC_CONFIRM_WAIT 10
+static lv_timer_t *confirm_timer;
+static lv_obj_t *confirm_button;
+static const char *confirm_text;
+static int confirm_left;
 
-static void cleanup_label(void)
+static void confirm_label(void)
 {
-    static char buf[48];
-    if (cleanup_left > 0)
-        snprintf(buf, sizeof(buf), LV_SYMBOL_TRASH "  Yes, delete (%d)", cleanup_left);
+    static char buf[64];
+    if (confirm_left > 0)
+        snprintf(buf, sizeof(buf), "%s (%d)", confirm_text, confirm_left);
     else
-        snprintf(buf, sizeof(buf), LV_SYMBOL_TRASH "  Yes, delete");
-    lv_label_set_text(lv_obj_get_child(cleanup_yes, 0), buf);
+        snprintf(buf, sizeof(buf), "%s", confirm_text);
+    lv_label_set_text(lv_obj_get_child(confirm_button, 0), buf);
 }
 
-static void stop_cleanup_timer(void)
+static void stop_confirm_timer(void)
 {
-    if (cleanup_timer) lv_timer_del(cleanup_timer);
-    cleanup_timer = NULL;
-    cleanup_yes = NULL;
+    if (confirm_timer) lv_timer_del(confirm_timer);
+    confirm_timer = NULL;
+    confirm_button = NULL;
 }
 
-static void cleanup_tick(lv_timer_t *timer)
+static void confirm_tick(lv_timer_t *timer)
 {
     (void)timer;
-    if (--cleanup_left > 0) { cleanup_label(); return; }
-    cleanup_label();
-    lv_obj_clear_state(cleanup_yes, LV_STATE_DISABLED);
-    lv_obj_set_style_text_color(lv_obj_get_child(cleanup_yes, 0), lv_color_hex(0xffffff), 0);
-    stop_cleanup_timer();
+    if (--confirm_left > 0) { confirm_label(); return; }
+    confirm_label();
+    lv_obj_clear_state(confirm_button, LV_STATE_DISABLED);
+    lv_obj_set_style_text_color(lv_obj_get_child(confirm_button, 0), lv_color_hex(0xffffff), 0);
+    stop_confirm_timer();
+}
+
+/* A primary button that is greyed out for SECONDS. */
+static void add_confirm_button_wait(const char *text, const char *action, int seconds)
+{
+    confirm_text = text;
+    confirm_button = add_button(text, action);
+    disable_button(confirm_button);
+    confirm_left = seconds;
+    confirm_label();
+    confirm_timer = lv_timer_create(confirm_tick, 1000, NULL);
+}
+
+static void add_confirm_button(const char *text, const char *action)
+{
+    add_confirm_button_wait(text, action, OC_CONFIRM_WAIT);
+}
+
+static const char *touch_name(const char *value)
+{
+    if (strcmp(value, "yes") == 0) return "GrumpyScreen";
+    return "None";
 }
 
 static void add_cleanup_button(void)
@@ -615,7 +628,7 @@ static void add_cleanup_button(void)
 static void show_page(enum page next)
 {
     page_now = next;
-    stop_cleanup_timer();
+    stop_confirm_timer();
     clear_buttons();
     lv_obj_add_flag(summary_box, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(spinner, LV_OBJ_FLAG_HIDDEN);
@@ -646,9 +659,8 @@ static void show_page(enum page next)
     lv_obj_add_flag(wifi_ta, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(wifi_kb, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(wifi_back, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_add_flag(tunnel_back, LV_OBJ_FLAG_HIDDEN);
     lv_obj_set_style_text_color(body_label, lv_color_hex(OC_COLOR_TEXT), 0);
-    if (next == PAGE_WIFI_PASS || next == PAGE_TUNNEL_PASS) lv_obj_add_flag(status_label, LV_OBJ_FLAG_HIDDEN);
+    if (next == PAGE_WIFI_PASS) lv_obj_add_flag(status_label, LV_OBJ_FLAG_HIDDEN);
     else lv_obj_clear_flag(status_label, LV_OBJ_FLAG_HIDDEN);
     if (start_page) lv_obj_clear_flag(quit_button, LV_OBJ_FLAG_HIDDEN);
     else lv_obj_add_flag(quit_button, LV_OBJ_FLAG_HIDDEN);
@@ -736,16 +748,18 @@ static void show_page(enum page next)
             lv_obj_clear_flag(wifi_back, LV_OBJ_FLAG_HIDDEN);
         }
         break;
-    case PAGE_TUNNEL_PASS:
-        set_title(next, "Tunneled mode password");
-        lv_label_set_text(body_label, tunnel_pass_wrong
-            ? "That password isn't right. Type it again, then press " LV_SYMBOL_OK "."
-            : "Tunneled mode needs a password. Type it, then press " LV_SYMBOL_OK " on the keyboard.");
-        lv_obj_set_style_text_color(body_label, lv_color_hex(tunnel_pass_wrong
-            ? OC_COLOR_DANGER : OC_COLOR_TEXT), 0);
-        lv_obj_clear_flag(wifi_ta, LV_OBJ_FLAG_HIDDEN);
-        lv_obj_clear_flag(wifi_kb, LV_OBJ_FLAG_HIDDEN);
-        lv_obj_clear_flag(tunnel_back, LV_OBJ_FLAG_HIDDEN);
+    case PAGE_TUNNEL_WARN:
+        set_title(next, "Tunneled mode: read this first");
+        lv_label_set_text(body_label,
+            "Tunneled mode moves Klipper off the printer onto your own SBC, connected by "
+            "one USB cable. The printer only forwards its boards to the SBC.");
+        lv_label_set_text_static(notice_label,
+            LV_SYMBOL_WARNING "  You must read the OpenCreator docs (OpenCreator for SBC) "
+            "and have a compatible device: an SBC with USB gadget mode, such as a Pi Zero 2 W "
+            "or a Pi 4/5 on its USB-C port. Without these, your printer will not work.");
+        lv_obj_clear_flag(notice_label, LV_OBJ_FLAG_HIDDEN);
+        add_button("Back", "tunnel-back");
+        add_confirm_button_wait(LV_SYMBOL_OK "  I understand", "tunnel-accept", OC_TUNNEL_WAIT);
         break;
     case PAGE_UPDATE:
         {
@@ -763,7 +777,7 @@ static void show_page(enum page next)
             add_summary_row("This installer", from_to);
             snprintf(setup, sizeof(setup), "%s%s%s, touchscreen %s",
                      tunnel ? "Tunneled" : "Printer SoC", tunnel ? "" : ", ",
-                     tunnel ? "" : prev_web, strcmp(prev_touch, "yes") == 0 ? "on" : "off");
+                     tunnel ? "" : prev_web, touch_name(prev_touch));
             add_summary_row("Setup kept", setup);
             if (warn_text[0]) {
                 lv_label_set_text_static(notice_label, warn_text);
@@ -787,7 +801,7 @@ static void show_page(enum page next)
                      "changes what is different.",
                      release_name[0] ? release_name : prev_version,
                      strcmp(prev_mode, "soc") == 0 ? "printer SoC" : "tunneled",
-                     prev_web, prev_touch);
+                     prev_web, touch_name(prev_touch));
             lv_label_set_text(body_label, buf);
         }
         add_button("Recovery", "recovery");
@@ -855,8 +869,7 @@ static void show_page(enum page next)
             }
             if (strcmp(touchscreen, prev_touch) != 0) {
                 snprintf(rows[changes], sizeof(rows[0]), "%s  " LV_SYMBOL_RIGHT "  %s",
-                         strcmp(prev_touch, "yes") == 0 ? "GrumpyScreen" : "None",
-                         strcmp(touchscreen, "yes") == 0 ? "GrumpyScreen" : "None");
+                         touch_name(prev_touch), touch_name(touchscreen));
                 add_summary_row("Touchscreen", rows[changes++]);
             }
             lv_label_set_text(body_label, changes == 0
@@ -887,8 +900,7 @@ static void show_page(enum page next)
         add_summary_row("Printer", model_name());
         add_summary_row("Mode", strcmp(mode, "soc") == 0 ? "Printer SoC" : "Tunneled SBC");
         if (strcmp(mode, "soc") == 0) add_summary_row("Web UI", web);
-        add_summary_row("Touchscreen",
-                         strcmp(touchscreen, "yes") == 0 ? "GrumpyScreen" : "None");
+        add_summary_row("Touchscreen", touch_name(touchscreen));
         if (warn_text[0]) {
             lv_label_set_text_static(notice_label, warn_text);
             lv_obj_clear_flag(notice_label, LV_OBJ_FLAG_HIDDEN);
@@ -953,11 +965,7 @@ static void show_page(enum page next)
             "Do you wish to continue?");
         lv_obj_clear_flag(notice_label, LV_OBJ_FLAG_HIDDEN);
         add_button("No, go back", "cleanup-back");
-        cleanup_yes = add_button(LV_SYMBOL_TRASH "  Yes, delete", "cleanup");
-        disable_button(cleanup_yes);
-        cleanup_left = OC_CLEANUP_WAIT;
-        cleanup_label();
-        cleanup_timer = lv_timer_create(cleanup_tick, 1000, NULL);
+        add_confirm_button(LV_SYMBOL_TRASH "  Yes, delete", "cleanup");
         break;
     case PAGE_RUNNING:
         set_title(next, restoring ? "Restoring backup"
@@ -1537,9 +1545,6 @@ int main(int argc, char **argv)
     wifi_back = make_button(screen, LV_SYMBOL_LEFT "  Networks", "wifi-back", false, 190, 50);
     lv_obj_align(wifi_back, LV_ALIGN_TOP_RIGHT, -30, 140);
     lv_obj_add_flag(wifi_back, LV_OBJ_FLAG_HIDDEN);
-    tunnel_back = make_button(screen, LV_SYMBOL_LEFT "  Back", "back", false, 190, 50);
-    lv_obj_align(tunnel_back, LV_ALIGN_TOP_RIGHT, -30, 140);
-    lv_obj_add_flag(tunnel_back, LV_OBJ_FLAG_HIDDEN);
 
     wifi_kb = lv_keyboard_create(screen);
     lv_obj_set_size(wifi_kb, width, height - 210);

@@ -8,8 +8,10 @@ The flow is:
 
 1. Check the printer model and the FlashForge kernel package (see below).
    On an unsupported kernel package, stop without changing anything.
-2. Choose installation on the printer SoC or tunnel mode. Tunnel mode asks for a
-   password first (`OC_TUNNEL_PASSWORD` in `src/main.c`), unless the install
+2. Choose installation on the printer SoC or tunnel mode. Tunnel mode first shows
+   a warning: read the OpenCreator docs (OpenCreator for SBC) and have an SBC with
+   USB gadget mode, or the printer won't work. **I understand** unlocks after
+   30 seconds (`OC_TUNNEL_WAIT` in `src/main.c`). It's skipped when the install
    record already says tunneled.
 3. In SoC mode, choose Fluidd (recommended) or Mainsail. In both modes, choose whether to
    install the recommended GrumpyScreen touchscreen. With tunnel mode, the
