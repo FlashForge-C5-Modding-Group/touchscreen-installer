@@ -32,6 +32,24 @@ touchscreen choice, UTC time, and backup location.
 
 ## What each mode installs
 
+The printer has no hardware clock, so it can still be at 1970 when the install
+starts. HTTPS downloads then fail with "certificate is not yet valid".
+`oc_set_clock` in `common/install-helpers.sh` sets it after Wi-Fi connects and
+again before Entware:
+
+1. It asks all 14 time servers at once: 10 NTP (pool.ntp.org, Google,
+   Cloudflare, Apple, Microsoft, Aliyun, Tencent, NIST) and 4 NIST ones over the
+   Time protocol (`rdate`). The first answer sets the clock.
+2. If none answers within 8 s, it asks 6 web servers at once and uses the
+   `Date` header of the first plain HTTP reply. That's for networks that block
+   both time ports.
+
+The rest are stopped as soon as one answers. A blocked network adds about 8 s,
+with a progress line before each step, so the install never looks stuck. Whatever happens, the clock is
+never left earlier than the `build-date` file that `make-usb.sh` writes into the
+payload. Certificates valid when the USB drive was made are then accepted. If
+everything fails, the log shows how to set the clock by hand.
+
 Both modes start with:
 
 1. **Entware** (`common/install-entware.sh`), as in the Creator-5-Mods

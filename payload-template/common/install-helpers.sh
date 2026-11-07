@@ -2,6 +2,93 @@
 # a downloaded GitHub release asset, and progress for long commands.
 # Sourced (". install-helpers.sh"), not executed.
 
+# oc_set_clock
+# HTTPS downloads fail with "certificate is not yet valid" while the clock is
+# still near 1970. Try NTP, then the time protocol, then the Date header of a
+# plain HTTP reply (port 80 gets through where NTP and rdate are blocked).
+# Never leave the clock earlier than this payload's build-date.
+OC_NTP_SERVERS="pool.ntp.org time.google.com time.cloudflare.com time.apple.com
+time.windows.com 0.pool.ntp.org 1.pool.ntp.org ntp.aliyun.com ntp.tencent.com
+time.nist.gov"
+OC_RDATE_SERVERS="time.nist.gov time-a-g.nist.gov time-b-g.nist.gov time-a-wwv.nist.gov"
+OC_DATE_URLS="http://bin.entware.net/ http://github.com/ http://www.google.com/
+http://www.cloudflare.com/ http://www.baidu.com/ http://www.microsoft.com/"
+
+# The Date header of URL as "YYYY-MM-DD HH:MM:SS" (UTC), or nothing.
+oc_url_date() {
+    { /opt/bin/curl -sI -m 6 "$1" 2>/dev/null || wget -S -q -O /dev/null -T 6 "$1" 2>&1; } |
+        tr -d '\r' | sed -n 's/^ *[Dd]ate: *[A-Za-z]*, *//p' | head -n 1 |
+        awk '{ m = index("JanFebMarAprMayJunJulAugSepOctNovDec", $2)
+               if (m && $3 >= 2024)
+                   printf "%04d-%02d-%02d %s\n", $3, (m + 2) / 3, $1, $4 }'
+}
+
+# oc_race DIR SECS PIDS...: wait until an attempt has written DIR/ok, every
+# attempt (PIDS) has ended, or SECS pass; then stop the rest. busybox ntpd -q
+# retries forever when port 123 is silently dropped.
+oc_race() {
+    local dir=$1 secs=$2 i=0 pid alive
+    shift 2
+    while [ "$i" -lt $((secs * 4)) ] && [ ! -s "$dir/ok" ]; do
+        alive=
+        for pid in "$@"; do kill -0 "$pid" 2>/dev/null && { alive=1; break; }; done
+        [ -n "$alive" ] || break
+        sleep 0.25 2>/dev/null || sleep 1
+        i=$((i + 1))
+    done
+    cat "$dir"/pid.* 2>/dev/null | xargs kill 2>/dev/null
+    kill "$@" 2>/dev/null
+    rm -f "$dir"/pid.*
+    [ -s "$dir/ok" ]
+}
+
+oc_set_clock() {
+    local how= stamp floor server url n=0 dir pids=
+    dir=${TMPDIR:-/tmp}/oc-clock.$$
+    rm -rf "$dir"; mkdir -p "$dir"
+    # Every NTP and Time-protocol server at once: the first answer sets the clock
+    echo "STAGE Asking $(echo $OC_NTP_SERVERS $OC_RDATE_SERVERS | wc -w) time servers"
+    for server in $OC_NTP_SERVERS; do
+        n=$((n + 1))
+        ( busybox ntpd -n -q -p "$server" >/dev/null 2>&1 & echo $! > "$dir/pid.$n"
+          wait $! && echo "NTP ($server)" >> "$dir/ok" ) 2>/dev/null &
+        pids="$pids $!"
+    done
+    for server in $OC_RDATE_SERVERS; do
+        n=$((n + 1))
+        ( rdate -s "$server" >/dev/null 2>&1 & echo $! > "$dir/pid.$n"
+          wait $! && echo "time server ($server)" >> "$dir/ok" ) 2>/dev/null &
+        pids="$pids $!"
+    done
+    oc_race "$dir" 8 $pids && how=$(head -n 1 "$dir/ok")
+    if [ -z "$how" ]; then
+        # Port 80 gets through where NTP (UDP 123) and TCP 37 are blocked
+        echo "STAGE No time server answered; reading the date from web servers"
+        pids=
+        for url in $OC_DATE_URLS; do
+            ( stamp=$(oc_url_date "$url") && [ -n "$stamp" ] &&
+                echo "$stamp $url" >> "$dir/ok" ) 2>/dev/null &
+            pids="$pids $!"
+        done
+        if oc_race "$dir" 8 $pids; then
+            stamp=$(head -n 1 "$dir/ok")
+            url=${stamp#* * }
+            date -u -s "${stamp%" $url"}" >/dev/null 2>&1 && how="web server date ($url)"
+        fi
+    fi
+    rm -rf "$dir"
+    floor=$(head -n 1 "${OC_PAYLOAD:-${PAYLOAD:-}}/build-date" 2>/dev/null) || floor=
+    if [ -n "$floor" ] && [ "$(date -u +%s)" -lt "$(date -u -d "$floor" +%s 2>/dev/null || echo 0)" ]; then
+        date -u -s "$floor" >/dev/null 2>&1 && how="${how:+$how, raised to }installer build date"
+    fi
+    if [ -n "$how" ]; then
+        echo "STAGE Clock set from $how: $(date -u '+%Y-%m-%d %H:%M UTC')"
+    else
+        echo "WARN Could not set the clock; HTTPS downloads may fail. Set it with: date -s \"YYYY-MM-DD HH:MM:SS\""
+        return 1
+    fi
+}
+
 # oc_git_clone_shallow URL DEST [BRANCH]
 # Depth-1 clone: just the latest commit, not the whole history, so
 # repeated installs don't fill up the printer's limited storage.

@@ -202,16 +202,10 @@ wifi_connect() {
     stage "Connected to $ssid"
 }
 # The clock is wrong after a boot without network, and HTTPS downloads fail
-# on a wrong date: NTP first, then the time protocol (rdate).
+# on a wrong date. common/install-helpers.sh has the fallbacks.
 set_clock() {
     stage "Setting the clock"
-    if busybox ntpd -n -q -p pool.ntp.org >/dev/null 2>&1 ||
-        busybox ntpd -n -q -p time.google.com >/dev/null 2>&1 ||
-        rdate -s time.nist.gov >/dev/null 2>&1 || rdate -s time-a-g.nist.gov >/dev/null 2>&1; then
-        stage "Clock set: $(date -u '+%Y-%m-%d %H:%M UTC')"
-    else
-        warn "Could not reach a time server; the clock may be wrong"
-    fi
+    ( . "$PAYLOAD/common/install-helpers.sh" && oc_set_clock ) || true
 }
 # FlashForge firmware version: app_startup.sh runs the highest numbered
 # folder in software/. OC_FF_VERSION overrides it; demo installs count as 1.9.9.

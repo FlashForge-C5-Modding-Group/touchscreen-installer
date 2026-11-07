@@ -17,6 +17,8 @@ cp "$ROOT/scripts/runFirmwareExe.sh" "$OUT/runFirmwareExe.sh"
 cp "$BIN" "$OUT/opencreator/opencreator-installer"
 cp "$ROOT/scripts/install.sh" "$OUT/opencreator/install.sh"
 cp -R "$ROOT/payload-template/." "$OUT/opencreator/payload/"
+# The earliest the printer's clock can be; see oc_set_clock.
+date -u '+%Y-%m-%d %H:%M:%S' > "$OUT/opencreator/payload/build-date"
 for pkg in ${MCU_PACKAGE:-}; do
     cp "$pkg" "$pkg.sha256" "$pkg.manifest.json" "$OUT/opencreator/payload/mcu-firmware/"
 done

@@ -59,7 +59,7 @@ if [ -n "$DEMO_ROOT" ]; then
 fi
 
 echo "STAGE Setting the clock"
-rdate -s time.nist.gov 2>/dev/null || echo "STAGE Clock not set (no time server); continuing"
+oc_set_clock || true
 
 echo "STAGE Enabling legacy NaN"
 busybox devmem "$OC_NAN_ADDR" 8 1
