@@ -9,7 +9,7 @@
 #   MODE        soc | tunnel          (default: soc)
 #   WEB         mainsail | fluidd | none   (default: fluidd, forced to
 #               none for tunnel mode)
-#   TOUCHSCREEN yes | no               (default: no)
+#   TOUCHSCREEN yes | helix | no       (default: no; yes is GrumpyScreen)
 #   DEMO_ROOT   where to write the demo tree (default: ./demo-root,
 #               wiped and recreated on every run)
 set -eu

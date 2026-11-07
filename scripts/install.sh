@@ -436,7 +436,7 @@ install_payload() {
     [ -n "$DEMO_ROOT" ] || [ "$(id -u)" -eq 0 ] || die "installation requires root"
     case "$MODE" in soc|tunnel) ;; *) die "invalid install mode" ;; esac
     case "$WEB" in mainsail|fluidd|none) ;; *) die "invalid web UI" ;; esac
-    case "$TOUCHSCREEN" in yes|no) ;; *) die "invalid touchscreen choice" ;; esac
+    case "$TOUCHSCREEN" in yes|helix|no) ;; *) die "invalid touchscreen choice" ;; esac
     [ "$MODE" != tunnel ] || [ "$WEB" = none ] || die "tunnel mode must skip web UI"
     [ "$MODE" != soc ] || [ "$WEB" != none ] || die "SoC mode requires a web UI"
     detect_model || die "unsupported or undetected printer model"
@@ -609,7 +609,7 @@ reconfigure() {
     [ -n "$DEMO_ROOT" ] || [ "$(id -u)" -eq 0 ] || die "changing the setup requires root"
     case "$MODE" in soc|tunnel) ;; *) die "invalid install mode" ;; esac
     case "$WEB" in mainsail|fluidd|none) ;; *) die "invalid web UI" ;; esac
-    case "$TOUCHSCREEN" in yes|no) ;; *) die "invalid touchscreen choice" ;; esac
+    case "$TOUCHSCREEN" in yes|helix|no) ;; *) die "invalid touchscreen choice" ;; esac
     [ "$MODE" != tunnel ] || [ "$WEB" = none ] || die "tunnel mode must skip web UI"
     [ "$MODE" != soc ] || [ "$WEB" != none ] || die "SoC mode requires a web UI"
     [ -f "$INSTALL_STATE" ] || die "no OpenCreator install record; use Recovery instead"
@@ -625,6 +625,7 @@ reconfigure() {
     MR=$DEMO_ROOT/usr/prog/moonraker
     TUNNELED=$OC/tunneled/tunneled.sh
     GRUMPY_DIR=$DEMO_ROOT/usr/data/grumpyscreen
+    HELIX=$DEMO_ROOT/usr/data/helixscreen/bin/helix-screen
 
     steps=
     if [ "$MODE" != "$old_mode" ]; then
@@ -653,6 +654,15 @@ reconfigure() {
             *) steps="installers/$MODE/02-install-loopscript.sh $steps" ;;
         esac
     fi
+    # 31-install-helixscreen.sh also turns GrumpyScreen off, and brings
+    # HelixScreen to its newest release.
+    if [ "$TOUCHSCREEN" = helix ] && [ "$old_touch" != helix ]; then
+        steps="$steps installers/$MODE/31-install-helixscreen.sh"
+        [ -f "$OC/startup/scripts/41-helixscreen.sh" ] || case " $steps " in
+            *" installers/$MODE/02-install-loopscript.sh "*) ;;
+            *) steps="installers/$MODE/02-install-loopscript.sh $steps" ;;
+        esac
+    fi
 
     total=2
     for step in $steps; do total=$((total + 1)); done
@@ -675,10 +685,15 @@ reconfigure() {
         if [ "$TOUCHSCREEN" = yes ]; then
             chmod 755 "$GRUMPY_DIR/grumpyscreen"
             stage "GrumpyScreen turned on"
-        else
+        elif [ -x "$GRUMPY_DIR/grumpyscreen" ]; then
             chmod 644 "$GRUMPY_DIR/grumpyscreen"
             stage "GrumpyScreen turned off (kept on the printer)"
         fi
+    fi
+    # The same for 41-helixscreen.sh.
+    if [ "$TOUCHSCREEN" != helix ] && [ -x "$HELIX" ]; then
+        chmod 644 "$HELIX"
+        stage "HelixScreen turned off (kept on the printer)"
     fi
     ensure_app_startup
     [ -f "$DEMO_ROOT/usr/prog/app_startup.sh" ] &&

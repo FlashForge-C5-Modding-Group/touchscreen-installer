@@ -13,10 +13,14 @@ The flow is:
    USB gadget mode, or the printer won't work. **I understand** unlocks after
    30 seconds (`OC_TUNNEL_WAIT` in `src/main.c`). It's skipped when the install
    record already says tunneled.
-3. In SoC mode, choose Fluidd (recommended) or Mainsail. In both modes, choose whether to
-   install the recommended GrumpyScreen touchscreen. With tunnel mode, the
-   finish page says to set `host` under `[moonraker]` in
-   `/usr/data/grumpyscreen/grumpyscreen.cfg` to the SBC.
+3. In SoC mode, choose Fluidd (recommended) or Mainsail. In both modes, choose the
+   touchscreen UI: GrumpyScreen (recommended), HelixScreen or none. With tunnel
+   mode and GrumpyScreen, the finish page says to set `host` under `[moonraker]`
+   in `/usr/data/grumpyscreen/grumpyscreen.cfg` to the SBC; HelixScreen's setup
+   wizard asks for the SBC's address itself. HelixScreen has limited support: it
+   uses a lot of the printer's CPU and memory, so Klipper can stop a print with
+   "Timer too close". A warning page says so, and its "I accept" button only
+   works after 10 seconds.
 4. Back up `/usr/prog/PROGRAM/software/firmwareExe` (the only file changed in
    FlashForge's program folder), `/usr/prog/moonraker`, `/usr/data/opencreator`,
    `/usr/data/mainsail`, `/usr/data/fluidd`, `/usr/data/nginx` and
@@ -146,9 +150,10 @@ every `startup/scripts/*.sh` in the background:
 | `25-fluidd-macros.sh` | Once Moonraker is up, gives Fluidd the OpenCreator macro layout if it has none |
 | `30-camera.sh` | Starts the webcam |
 | `40-grumpyscreen.sh` | Runs GrumpyScreen on the touchscreen's input device, if installed |
+| `41-helixscreen.sh` | Runs HelixScreen instead, if installed |
 | `99-opencreator-updater.sh` | Merges config template updates |
 
-`tunneled.sh` runs `05-entfix.sh`, `06-sftp.sh`, the camera and GrumpyScreen, then the socat
+`tunneled.sh` runs `05-entfix.sh`, `06-sftp.sh`, the camera and the touchscreen UI, then the socat
 bridge in a restart loop.
 
 ## Printer model detection
@@ -325,7 +330,13 @@ pip-installs the Klippy modules that are missing (unpinned), since the pinned
 requirements would build numpy from source on the printer. Both modes have
 `30-install-grumpyscreen.sh`, which runs `soc/installgrumpy.sh` when the
 touchscreen was chosen: it downloads the latest GrumpyScreen release and checks
-that it is an ELF binary. Everything except the MCU firmware package (a
+that it is an ELF binary. `31-install-helixscreen.sh` runs `soc/installhelix.sh`
+for HelixScreen: it takes the newest release, betas included, of its AD5X
+build (the AD5X has the same Ingenic X2600, and the binaries are static),
+unpacks it to `/usr/data/helixscreen`, keeps its settings over an update, and
+adds it to Moonraker's update manager on the beta channel. Only one of the two
+runs: each step turns the other one off by clearing its executable bit, as
+Update Configs does. Everything except the MCU firmware package (a
 release input on the drive) is downloaded during the install. A missing
 installer fails visibly and leaves the backup intact. Scripts can emit
 `STAGE message` to show progress. The backup destination must exist and be

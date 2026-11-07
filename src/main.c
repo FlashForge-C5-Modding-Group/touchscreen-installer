@@ -17,7 +17,7 @@
 enum page { PAGE_CHECK, PAGE_MODE, PAGE_WEB, PAGE_TOUCHSCREEN, PAGE_READY,
             PAGE_RUNNING, PAGE_DONE, PAGE_ERROR, PAGE_RESTORE, PAGE_KERNEL,
             PAGE_INSTALLED, PAGE_ROLLBACK, PAGE_UPDATE, PAGE_OFFLINE, PAGE_WIFI_PASS,
-            PAGE_TUNNEL_WARN, PAGE_CLEANUP };
+            PAGE_TUNNEL_WARN, PAGE_CLEANUP, PAGE_HELIX_WARN };
 static enum page page_now;
 static enum page cleanup_from;  /* the page Clean up storage was opened from */
 static const char *payload_path, *backup_path, *script_path;
@@ -113,7 +113,8 @@ static void step_info(enum page p, int *step, int *total)
     switch (p) {
     case PAGE_MODE:     *step = 1; break;
     case PAGE_WEB:        *step = 2; break;
-    case PAGE_TOUCHSCREEN: *step = soc ? 3 : 2; break;
+    case PAGE_TOUCHSCREEN:
+    case PAGE_HELIX_WARN: *step = soc ? 3 : 2; break;
     case PAGE_TUNNEL_WARN: *step = 1; break;
     case PAGE_READY:    *step = soc ? 4 : 3; break;
     case PAGE_RUNNING:
@@ -128,6 +129,7 @@ static const char *page_icon(enum page p)
     switch (p) {
     case PAGE_DONE:  return LV_SYMBOL_OK;
     case PAGE_ERROR:
+    case PAGE_HELIX_WARN:
     case PAGE_TUNNEL_WARN:
     case PAGE_KERNEL: return LV_SYMBOL_WARNING;
     case PAGE_RUNNING: return LV_SYMBOL_DOWNLOAD;
@@ -180,7 +182,8 @@ static void set_step_name(const char *script)
         {"install-python", "Python"}, {"install-stack", "Kalico"},
         {"install-moonraker", "Moonraker"}, {"install-timelapse", "Timelapse"},
         {"install-web", "Web UI"},
-        {"install-grumpyscreen", "Touchscreen"}, {"install-tunnel", "Tunnel bridge"},
+        {"install-grumpyscreen", "Touchscreen"}, {"install-helixscreen", "Touchscreen"},
+        {"install-tunnel", "Tunnel bridge"},
         {"enable-root", "Root login"}, {"enable-sftp", "SFTP"},
         {"activate-loopscript", "Activating"},
         {"flash-mcu-firmware", "MCU firmware"},
@@ -451,6 +454,12 @@ static void action_button(lv_event_t *event)
         touchscreen = "yes"; show_page(PAGE_READY);
     } else if (strcmp(action, "touch-no") == 0) {
         touchscreen = "no"; show_page(PAGE_READY);
+    } else if (strcmp(action, "touch-helix") == 0) {
+        show_page(PAGE_HELIX_WARN);
+    } else if (strcmp(action, "helix-accept") == 0) {
+        touchscreen = "helix"; show_page(PAGE_READY);
+    } else if (strcmp(action, "helix-back") == 0) {
+        show_page(PAGE_TOUCHSCREEN);
     } else if (strcmp(action, "install") == 0) {
         demo_root = NULL; unsetenv("OC_SKIP_BACKUP"); start_action("install");
     } else if (strcmp(action, "install-nobackup") == 0) {
@@ -534,6 +543,7 @@ static lv_obj_t *make_button(lv_obj_t *parent, const char *text, const char *act
 static lv_obj_t *add_button(const char *text, const char *action)
 {
     bool secondary = strcmp(action, "back") == 0 || strcmp(action, "touch-no") == 0 ||
+                     strcmp(action, "touch-helix") == 0 || strcmp(action, "helix-back") == 0 ||
                      strcmp(action, "tunnel-back") == 0 ||
                      strcmp(action, "home") == 0 || strcmp(action, "recovery") == 0 ||
                      strcmp(action, "rollback-confirm") == 0 || strcmp(action, "start") == 0 ||
@@ -565,8 +575,8 @@ static void add_summary_row(const char *label, const char *value)
     lv_obj_set_style_pad_bottom(row, 6, 0);
 }
 
-/* "Yes, delete" on the cleanup page and "I understand" on the tunneled page
- * only work after a countdown. */
+/* "Yes, delete" on the cleanup page and "I accept" on the HelixScreen page
+ * only work after a 10 s countdown. */
 #define OC_CONFIRM_WAIT 10
 static lv_timer_t *confirm_timer;
 static lv_obj_t *confirm_button;
@@ -619,6 +629,7 @@ static void add_confirm_button(const char *text, const char *action)
 static const char *touch_name(const char *value)
 {
     if (strcmp(value, "yes") == 0) return "GrumpyScreen";
+    if (strcmp(value, "helix") == 0) return "HelixScreen";
     return "None";
 }
 
@@ -847,11 +858,28 @@ static void show_page(enum page next)
     case PAGE_TOUCHSCREEN:
         set_title(next, "Install touchscreen UI?");
         lv_label_set_text(body_label, strcmp(mode, "soc") == 0
-            ? "GrumpyScreen is recommended for on-printer control."
+            ? "GrumpyScreen is recommended for on-printer control. HelixScreen also "
+              "runs, with limited support."
             : "GrumpyScreen runs on the printer's screen and controls Klipper on your SBC. "
-              "After installing, point its config in /usr/data/grumpyscreen/ at the SBC.");
-        add_button("Yes (recommended)", "touch-yes");
+              "After installing, point its config in /usr/data/grumpyscreen/ at the SBC. "
+              "HelixScreen also runs, with limited support.");
+        add_button("GrumpyScreen (recommended)", "touch-yes");
+        add_button("HelixScreen", "touch-helix");
         add_button("No", "touch-no");
+        break;
+    case PAGE_HELIX_WARN:
+        set_title(next, "HelixScreen: limited support");
+        lv_label_set_text(body_label,
+            "HelixScreen is installed from its newest release, betas included, using its "
+            "build for the FlashForge AD5X, which has the same chip.");
+        lv_label_set_text_static(notice_label,
+            LV_SYMBOL_WARNING "  HelixScreen is not fully supported on the Creator 5: it "
+            "uses a lot of the printer's CPU and memory, which Klipper needs too, so a print "
+            "may stop with \"Timer too close\". You will not get full support for it. Do you "
+            "accept this?");
+        lv_obj_clear_flag(notice_label, LV_OBJ_FLAG_HIDDEN);
+        add_button("Back", "helix-back");
+        add_confirm_button(LV_SYMBOL_OK "  I accept", "helix-accept");
         break;
     case PAGE_READY:
         if (update_configs) {
@@ -1030,6 +1058,11 @@ static void show_page(enum page next)
                     "host under [moonraker] to your SBC's IP address, then reboot. "
                     "Until then the screen can't reach Klipper.");
                 lv_obj_clear_flag(notice_label, LV_OBJ_FLAG_HIDDEN);
+            } else if (strcmp(mode, "tunnel") == 0 && strcmp(touchscreen, "helix") == 0) {
+                lv_label_set_text_static(notice_label,
+                    "Touchscreen: on its first start HelixScreen's setup wizard asks for "
+                    "your SBC's Moonraker address (its IP address, port 7125).");
+                lv_obj_clear_flag(notice_label, LV_OBJ_FLAG_HIDDEN);
             }
         }
         if (!demo_root) add_button(LV_SYMBOL_POWER "  Reboot now", "reboot");
@@ -1125,7 +1158,8 @@ static void process_line(char *line)
     } else if (strncmp(line, "PREVIOUS ", 9) == 0) {
         sscanf(line + 9, "%31s %15s %15s %7s", prev_version, prev_mode, prev_web, prev_touch);
         bool valid = (strcmp(prev_mode, "soc") == 0 || strcmp(prev_mode, "tunnel") == 0) &&
-                     (strcmp(prev_touch, "yes") == 0 || strcmp(prev_touch, "no") == 0) &&
+                     (strcmp(prev_touch, "yes") == 0 || strcmp(prev_touch, "no") == 0 ||
+                      strcmp(prev_touch, "helix") == 0) &&
                      (strcmp(prev_mode, "tunnel") == 0 || strcmp(prev_web, "fluidd") == 0 ||
                       strcmp(prev_web, "mainsail") == 0);
         installed_same = valid && strcmp(prev_version, installer_version) == 0;

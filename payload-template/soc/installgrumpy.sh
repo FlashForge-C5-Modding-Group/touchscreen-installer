@@ -45,5 +45,12 @@ if [ "${OC_MODE:-}" = soc ] && [ -f "$MOONRAKER_CONF" ] &&
     printf '\n[update_manager grumpyscreen]\ntype: executable\nchannel: stable\nrepo: %s\npath: /usr/data/grumpyscreen\nis_system_service: False\n' \
         "$REPO" >> "$MOONRAKER_CONF"
 fi
+# One screen at a time: 41-helixscreen.sh only starts an executable binary.
+HELIX=$DEMO_ROOT/usr/data/helixscreen/bin/helix-screen
+if [ -f "$HELIX" ] && [ -x "$HELIX" ]; then
+    chmod 644 "$HELIX"
+    echo "STAGE HelixScreen turned off (kept on the printer)"
+fi
+chmod 755 "$destination/grumpyscreen"
 sync
 echo "STAGE GrumpyScreen installed"
