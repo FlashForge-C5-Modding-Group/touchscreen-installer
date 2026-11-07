@@ -215,6 +215,23 @@ the detected package; demo installs default to 2.0.7. In the SDL demo,
   page and the error page after a failed install offer to restore it. Folders
   that did not exist at backup time (listed in `absent.list`) are removed.
   MCU firmware is not rolled back.
+- **Rollback to stock**: offered on the start pages once the model is known.
+  Full rollback (`stock-reset`) uses no backup archive. It puts back the stock
+  `firmwareExe` OpenCreator moved aside (the same copies Quick rollback uses,
+  or the archive's when the printer has none), puts back the stock boot logo
+  (`payload/common/stock-logo.jpeg`, the same 480x800 image as the OpenCreator
+  docs; the archive's rootfs `etc/logo.jpeg` is the 800x480 kernel splash), and
+  downloads the newest `control` folder (MCU
+  firmware, flash tools and FlashForge's `run.sh`) for the model from
+  `creator-5-pro-firmware-archive` or `creator-5-firmware-archive`. Each
+  download is checked against its git blob hash from the GitHub API before
+  anything changes. The control folder replaces `/usr/prog/PROGRAM/control/*` as
+  `control/<version>` (the version from the archive's `software/md5sum.list`)
+  with its `Update` flag, as a FlashForge update leaves it, so FlashForge's
+  `app_startup.sh` flashes the boards at the next boot. OpenCreator's pending
+  MCU flash and firmware marker are removed. Quick rollback, when a stock
+  `firmwareExe` copy is on the printer, only puts that back and leaves the MCU
+  firmware alone.
 - **Stock timelapse frames**: the backup includes
   `/usr/data/firmwareRes/camera/jpeg`, where the stock firmware keeps its
   timelapse frames. It can be large, so it's archived without gzip (JPEGs

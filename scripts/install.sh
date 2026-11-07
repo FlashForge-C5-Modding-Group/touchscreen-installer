@@ -722,6 +722,109 @@ rollback_stock() {
     stage "Rolled back to stock; reboot to start FlashForge's firmware"
 }
 
+# Full stock rollback: nothing from backups. FlashForge's firmwareExe and
+# newest control package (MCU firmware) come from the model's firmware
+# archive, each checked against its git blob hash. The boot logo is the
+# stock one from the OpenCreator docs, shipped in the payload: the archive's
+# kernel logo is the 800x480 splash, not the 480x800 screen logo. The control
+# package goes where a FlashForge update leaves it, with its Update flag, so
+# FlashForge's app_startup.sh flashes the boards at the next boot.
+ARCHIVE_OWNER=FlashForge-C5-Modding-Group
+STOCK_LOGO=$PAYLOAD/common/stock-logo.jpeg
+# archive_files PATH: "name sha size url" for a file or each file in a folder.
+archive_files() {
+    curl -fsSL -H 'Accept: application/vnd.github+json' \
+        "https://api.github.com/repos/$ARCHIVE/contents/$1?ref=main" |
+        tr ',{}' '\n\n\n' | awk '
+            /"name":/ { n = $0; sub(/^.*"name": *"/, "", n); sub(/".*$/, "", n) }
+            /"sha":/ { s = $0; sub(/^.*"sha": *"/, "", s); sub(/".*$/, "", s) }
+            /"size":/ { z = $0; sub(/^.*"size": */, "", z); sub(/[^0-9].*$/, "", z) }
+            /"download_url":/ { u = $0; sub(/^.*"download_url": *"/, "", u); sub(/".*$/, "", u)
+                if (u ~ /^https:/) print n, s, z, u }'
+}
+blob_sha() {
+    { printf 'blob %s\0' "$(wc -c < "$1" | tr -d ' ')"; cat "$1"; } | sha1sum | cut -d' ' -f1
+}
+fetch_checked() {  # fetch_checked "name sha size url" DEST
+    set -- $1 "$2"
+    curl -fsSL -o "$5" "$4" || die "could not download $1 from $ARCHIVE; nothing was changed"
+    [ "$(blob_sha "$5")" = "$2" ] || die "$1 from $ARCHIVE failed its checksum; nothing was changed"
+}
+stock_reset() {
+    [ -n "$DEMO_ROOT" ] || [ "$(id -u)" -eq 0 ] || die "rollback requires root"
+    detect_model || die "unsupported or undetected printer model"
+    case "$MACHINE" in
+        Creator5Pro) ARCHIVE=$ARCHIVE_OWNER/creator-5-pro-firmware-archive ;;
+        *) ARCHIVE=$ARCHIVE_OWNER/creator-5-firmware-archive ;;
+    esac
+    APP_STARTUP=$DEMO_ROOT/usr/prog/app_startup.sh
+    grep -q 'PROGRAM/control' "$APP_STARTUP" 2>/dev/null ||
+        die "app_startup.sh has no control update check, so the MCU firmware could not be flashed; nothing was changed"
+    PROG=$DEMO_ROOT/usr/prog
+    WORK=${TMPDIR:-/tmp}/stock-reset
+    rm -rf "$WORK"
+    mkdir -p "$WORK/control"
+    progress 0 5
+    stage "Downloading stock files for the $MACHINE from $ARCHIVE"
+    ver=$(curl -fsSL "https://raw.githubusercontent.com/$ARCHIVE/main/software/md5sum.list" |
+        sed -n 's#^[0-9a-f]*  *\./control/\([0-9][0-9.]*\)/run\.sh$#\1#p' | head -n 1) || ver=
+    files=$(archive_files control) || die "could not list $ARCHIVE/control; nothing was changed"
+    for f in run.sh IAPCommand ISPCommand eBoard.hex heaterBoard.hex levelBoard.hex mainBoardGD.hex; do
+        printf '%s\n' "$files" | grep -q "^$f " || die "$ARCHIVE/control has no $f; nothing was changed"
+    done
+    printf '%s\n' "$files" > "$WORK/control.list"
+    while IFS= read -r line; do
+        stage "Downloading control/${line%% *}"
+        fetch_checked "$line" "$WORK/control/${line%% *}"
+    done < "$WORK/control.list"
+    progress 1 5
+    # The stock firmwareExe OpenCreator moved aside when it activated; the
+    # archive's copy only when the printer has none.
+    if src=$(stock_firmware_exe); then
+        stage "Using FlashForge's firmwareExe saved at $src"
+        cp "$src" "$WORK/firmwareExe" || die "could not copy $src; nothing was changed"
+    else
+        line=$(archive_files software/firmwareExe | grep '^firmwareExe ') ||
+            die "no stock firmwareExe on the printer and none in $ARCHIVE; nothing was changed"
+        stage "No stock firmwareExe on the printer; downloading FlashForge's"
+        fetch_checked "$line" "$WORK/firmwareExe"
+    fi
+    [ "$(dd if="$WORK/firmwareExe" bs=1 skip=1 count=3 2>/dev/null)" = ELF ] ||
+        die "downloaded firmwareExe is not ELF; nothing was changed"
+    [ "$(od -An -tx1 -N3 "$STOCK_LOGO" 2>/dev/null | tr -d ' ')" = ffd8ff ] ||
+        die "the installer has no stock boot logo; nothing was changed"
+    cp "$STOCK_LOGO" "$WORK/logo.jpeg" || die "could not copy the stock boot logo; nothing was changed"
+    progress 2 5
+
+    stage "Staging FlashForge's control package ${ver:-(unversioned)} for the next boot"
+    : > "$WORK/control/Update"
+    chmod 755 "$WORK/control/run.sh" "$WORK/control/IAPCommand" "$WORK/control/ISPCommand"
+    mkdir -p "$PROG/PROGRAM/control"
+    rm -rf "$PROG/PROGRAM/control/"*
+    mv "$WORK/control" "$PROG/PROGRAM/control/${ver:-1.0.0}" || die "could not stage the control package"
+    # OpenCreator's own MCU flash must not run over it.
+    rm -rf "$STATE_DIR/mcu-flash-pending" "$STATE_DIR/mcu-firmware.commit"
+    sync
+    progress 3 5
+    stage "Restoring the stock boot logo"
+    cp "$WORK/logo.jpeg" "$PROG/logo.jpeg.new" && mv "$PROG/logo.jpeg.new" "$PROG/logo.jpeg" ||
+        die "could not replace the boot logo"
+    stage "Restoring FlashForge's firmwareExe"
+    FE=$PROG/PROGRAM/software/firmwareExe
+    mkdir -p "$(dirname "$FE")"
+    cp "$WORK/firmwareExe" "$FE.new" || die "could not copy firmwareExe"
+    chmod 755 "$FE.new"
+    sync
+    mv "$FE.new" "$FE" || die "could not replace firmwareExe"
+    sync
+    progress 4 5
+    [ ! -f "$INSTALL_STATE" ] || mv "$INSTALL_STATE" "$INSTALL_STATE.rolled-back"
+    rm -rf "$WORK"
+    sync
+    progress 5 5
+    stage "Rolled back to stock; the MCUs are flashed with FlashForge's firmware ${ver:-} at the next boot"
+}
+
 # Frees space: print files, timelapse videos and logs, other mods' leftovers,
 # docs and man pages, caches and FlashForge update downloads. Git checkouts
 # and the stock firmware's own model files are kept.
@@ -764,6 +867,7 @@ cleanup_storage() {
 case "$ACTION" in
     check) check ;;
     rollback) rollback_stock ;;
+    stock-reset) require_online; stock_reset ;;
     cleanup) cleanup_storage ;;
     install) require_online; install_payload ;;
     reconfigure) require_online; reconfigure ;;

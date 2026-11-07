@@ -483,6 +483,7 @@ static void action_button(lv_event_t *event)
     else if (strcmp(action, "restore-confirm") == 0) show_page(PAGE_RESTORE);
     else if (strcmp(action, "rollback-confirm") == 0) show_page(PAGE_ROLLBACK);
     else if (strcmp(action, "rollback") == 0) { demo_root = NULL; start_action("rollback"); }
+    else if (strcmp(action, "stock-reset") == 0) { demo_root = NULL; start_action("stock-reset"); }
     else if (strcmp(action, "cleanup-confirm") == 0) { cleanup_from = page_now; show_page(PAGE_CLEANUP); }
     else if (strcmp(action, "cleanup-back") == 0) show_page(cleanup_from);
     else if (strcmp(action, "cleanup") == 0) { demo_root = NULL; start_action("cleanup"); }
@@ -536,6 +537,7 @@ static lv_obj_t *add_button(const char *text, const char *action)
                      strcmp(action, "tunnel-back") == 0 ||
                      strcmp(action, "home") == 0 || strcmp(action, "recovery") == 0 ||
                      strcmp(action, "rollback-confirm") == 0 || strcmp(action, "start") == 0 ||
+                     strcmp(action, "rollback") == 0 ||
                      strcmp(action, "restore-confirm") == 0 || strcmp(action, "mainsail") == 0 ||
                      strcmp(action, "install-nobackup") == 0 ||
                      strcmp(action, "update-nobackup") == 0 ||
@@ -672,7 +674,8 @@ static void show_page(enum page next)
                  wifi_shown ? -328 : start_page ? -226 : -124, 18);
     bool restoring = strcmp(current_action, "restore") == 0;
     bool reconfiguring = strcmp(current_action, "reconfigure") == 0;
-    bool rolling_back = strcmp(current_action, "rollback") == 0;
+    bool full_rollback = strcmp(current_action, "stock-reset") == 0;
+    bool rolling_back = full_rollback || strcmp(current_action, "rollback") == 0;
     bool cleaning = strcmp(current_action, "cleanup") == 0;
 
     switch (next) {
@@ -786,7 +789,7 @@ static void show_page(enum page next)
             add_button("Change setup", "change-setup");
             add_button("Update without backup", "update-nobackup");
             add_button(LV_SYMBOL_UPLOAD "  Back up and update", "update");
-            if (stock_found[0]) add_button(LV_SYMBOL_REFRESH "  Rollback to stock", "rollback-confirm");
+            if (model_known) add_button(LV_SYMBOL_REFRESH "  Rollback to stock", "rollback-confirm");
             add_cleanup_button();
         }
         break;
@@ -809,7 +812,7 @@ static void show_page(enum page next)
         /* The same update as an available one, for re-applying it. */
         add_button(LV_SYMBOL_REFRESH "  Update again", "update");
         if (backup_found[0]) add_button(LV_SYMBOL_LOOP "  Restore backup", "restore-confirm");
-        if (stock_found[0]) add_button(LV_SYMBOL_REFRESH "  Rollback to stock", "rollback-confirm");
+        if (model_known) add_button(LV_SYMBOL_REFRESH "  Rollback to stock", "rollback-confirm");
         add_cleanup_button();
         break;
     case PAGE_MODE:
@@ -831,7 +834,7 @@ static void show_page(enum page next)
         add_button("Tunneled", "tunnel");
         if (backup_found[0] && !installed_same)
             add_button(LV_SYMBOL_LOOP "  Restore backup", "restore-confirm");
-        if (stock_found[0] && !installed_same)
+        if (model_known && !installed_same)
             add_button(LV_SYMBOL_REFRESH "  Rollback to stock", "rollback-confirm");
         add_cleanup_button();
         break;
@@ -942,15 +945,18 @@ static void show_page(enum page next)
         {
             static char buf[1024];
             snprintf(buf, sizeof(buf),
-                     "Only FlashForge's firmwareExe is put back, from:\n%s\n"
-                     "Everything OpenCreator runs is started by its own firmwareExe, so "
-                     "after a reboot the printer runs the stock firmware. OpenCreator's "
-                     "files stay on the printer; install again to go back. MCU firmware "
-                     "is not rolled back.", stock_found);
+                     "Full rollback puts back FlashForge's firmwareExe that OpenCreator moved "
+                     "aside (downloaded if the printer has none), puts the stock boot logo back "
+                     "and downloads the newest MCU firmware for this model; at the next boot the stock "
+                     "firmware flashes the MCUs, which takes a few minutes.%s%s%s "
+                     "OpenCreator's files stay on the printer; install again to go back.",
+                     stock_found[0] ? "\nQuick rollback only puts FlashForge's firmwareExe back, from:\n" : "",
+                     stock_found, stock_found[0] ? "\nand leaves the MCU firmware as it is." : "");
             lv_label_set_text(body_label, buf);
         }
         add_button("Back", "start");
-        add_button("Roll back now", "rollback");
+        if (stock_found[0]) add_button("Quick rollback", "rollback");
+        add_button(LV_SYMBOL_DOWNLOAD "  Full rollback", "stock-reset");
         break;
     case PAGE_CLEANUP:
         set_title(next, "Clean up storage?");
@@ -976,6 +982,8 @@ static void show_page(enum page next)
         lv_label_set_text(body_label, demo_root
             ? "Follow the live status below. Writing to " OC_DEMO_INSTALL_ROOT
               ", not the real system -- safe to power off."
+            : full_rollback ? "Downloading the stock MCU firmware, then putting it, the stock boot "
+              "logo and FlashForge's firmwareExe in place. Do not power off."
             : rolling_back ? "Putting FlashForge's firmwareExe back. Do not power off."
             : cleaning ? "Deleting files. Do not power off."
             : reconfiguring
@@ -1000,8 +1008,12 @@ static void show_page(enum page next)
             lv_label_set_text(body_label, "The backed-up folders are back in place. Reboot to start the restored stack.");
         } else if (rolling_back) {
             set_title(next, "Rolled back to stock");
-            lv_label_set_text(body_label, "FlashForge's firmwareExe is back. Unplug the installer "
-                              "USB drive and reboot to start the stock firmware.");
+            lv_label_set_text(body_label, full_rollback
+                ? "FlashForge's firmwareExe, boot logo and MCU firmware are in place. Unplug the "
+                  "installer USB drive and reboot: the stock firmware flashes the MCUs first, "
+                  "which takes a few minutes. Do not power off while it does."
+                : "FlashForge's firmwareExe is back. Unplug the installer "
+                  "USB drive and reboot to start the stock firmware.");
         } else {
             set_title(next, demo_root ? "Demo install complete"
                             : reconfiguring ? "Changes applied" : "Installation complete");
