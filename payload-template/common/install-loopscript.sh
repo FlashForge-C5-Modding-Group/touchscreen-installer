@@ -50,6 +50,11 @@ if [ "$TOUCHSCREEN" = yes ] && [ ! -f "$GRUMPY_DIR/grumpyscreen.cfg" ]; then
     mkdir -p "$GRUMPY_DIR"
     cp "$FS/grumpyscreen/grumpyscreen.cfg" "$GRUMPY_DIR/grumpyscreen.cfg"
 fi
+# GrumpyScreen's translations, beside its binary; the updater keeps them current
+if [ "$TOUCHSCREEN" = yes ] && [ -d "$FS/grumpyscreen/languages" ]; then
+    mkdir -p "$GRUMPY_DIR/languages"
+    cp "$FS/grumpyscreen/languages/"*.json "$GRUMPY_DIR/languages/"
+fi
 
 sync
 echo "STAGE LoopScript files installed (activated at the end)"
