@@ -130,6 +130,32 @@ if [ -n "$broken" ]; then
     echo "STAGE Entware packages repaired"
 fi
 
+# Entware's binutils 2.46 ld crashes linking Pillow on MIPS (signal 11,
+# "relocation truncated to fit: R_MIPS_CALL16", elfxx-mips.c assertion), even
+# with -mxgot. 2.45.1 links it: install that from Entware's archive and hold it
+# so an opkg upgrade doesn't bring 2.46 back.
+BINUTILS_PIN=2.45.1-1
+BINUTILS_PACKAGES="libbfd libctf libopcodes objdump ar binutils"
+binutils_version=$(/opt/bin/opkg list-installed binutils 2>/dev/null | sed -n 's/^binutils - //p')
+case "$binutils_version" in
+""|"$BINUTILS_PIN"|2.4[0-5]*|2.[0-3]*) ;;
+*)
+    echo "STAGE Installing binutils $BINUTILS_PIN (Entware's $binutils_version can't link Pillow)"
+    urls=
+    for package in $BINUTILS_PACKAGES; do
+        urls="$urls $ENTWARE/archive/${package}_${BINUTILS_PIN}_mipsel-3.4.ipk"
+    done
+    # shellcheck disable=SC2086
+    oc_run_staged /opt/bin/opkg install --force-downgrade $urls \
+        || die "cannot install binutils $BINUTILS_PIN"
+    ;;
+esac
+if [ -n "$binutils_version" ]; then
+    for package in $BINUTILS_PACKAGES; do
+        /opt/bin/opkg flag hold "$package" >/dev/null 2>&1 || true
+    done
+fi
+
 if [ ! -f /opt/include/stdio.h ]; then
     echo "STAGE Installing compiler headers"
     mkdir -p /opt/include
