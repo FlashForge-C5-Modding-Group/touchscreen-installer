@@ -214,7 +214,9 @@ the detected package; demo installs default to 2.0.7. In the SDL demo,
   (or `/tmp/opencreator-installer.log` if that is not writable).
 - **Reinstall notice**: when `firmwareExe` is back to stock on a printer that
   has had OpenCreator, the installer says it will reinstall and goes to the full
-  install, as an update wouldn't bring the launcher back.
+  install, as an update wouldn't bring the launcher back. That install drops
+  `mcu-firmware.commit`, so the MCUs are flashed even when the marker says
+  they're current: stock firmware may have been put back on them.
 - **Restore backup**: when a previous OpenCreator backup exists (the one in
   `install.json`, otherwise the newest `BACKUP_DIR/opencreator-*`), the mode
   page and the error page after a failed install offer to restore it. Folders

@@ -32,8 +32,8 @@ if [ -z "$DEMO_ROOT" ]; then
 fi
 STATE_DIR=${OC_STATE_DIR:-"$DEMO_ROOT/usr/data/opencreator"}
 INSTALL_STATE=$STATE_DIR/install.json
-INSTALLER_VERSION=0.0.7.1
-INSTALLER_RELEASE="Public Alpha 7"
+INSTALLER_VERSION=0.0.7.2
+INSTALLER_RELEASE="Public Alpha 7.1"
 MIN_FREE_KB=${OC_MIN_FREE_KB:-262144}
 BACKUP_FOLDERS="usr/prog/PROGRAM/software/firmwareExe usr/prog/moonraker usr/data/opencreator
 usr/data/mainsail usr/data/fluidd usr/data/nginx usr/prog/c5-tunnel-socat
@@ -303,6 +303,14 @@ latest_backup() {
     fi
     [ -n "$LATEST_BACKUP" ]
 }
+# Stock firmwareExe on a printer that has had OpenCreator: a rollback or a
+# FlashForge update. Either can leave FlashForge's firmware on the MCUs.
+reverted_to_stock() {
+    fe=$DEMO_ROOT/usr/prog/PROGRAM/software/firmwareExe
+    [ -f "$fe" ] && [ "$(dd if="$fe" bs=1 skip=1 count=3 2>/dev/null)" = ELF ] &&
+        { [ -f "$INSTALL_STATE" ] || [ -f "$INSTALL_STATE.rolled-back" ] ||
+          [ -f "$STATE_DIR/firmwareExe.stock" ]; }
+}
 check() {
     printf 'VERSION %s\n' "$INSTALLER_VERSION"
     printf 'RELEASE %s\n' "$INSTALLER_RELEASE"
@@ -370,9 +378,7 @@ check() {
     # Stock firmwareExe on a printer that has had OpenCreator (a rollback or a
     # FlashForge update): an update wouldn't bring the launcher back, so the
     # app sends this to a full install. After PREVIOUS, which this overrides.
-    if [ -f "$fe" ] && [ "$(dd if="$fe" bs=1 skip=1 count=3 2>/dev/null)" = ELF ] &&
-        { [ -f "$INSTALL_STATE" ] || [ -f "$INSTALL_STATE.rolled-back" ] ||
-          [ -f "$STATE_DIR/firmwareExe.stock" ]; }; then
+    if reverted_to_stock; then
         printf 'REVERTED\n'
         warn "firmwareExe is back to stock, so OpenCreator is not running. Continuing will reinstall OpenCreator."
     fi
@@ -480,6 +486,12 @@ install_payload() {
         RECORDED_BACKUP=$BACKUP_TARGET
     fi
     remove_foreign
+    # Back from stock: the boards' firmware is unknown, so the MCU step
+    # flashes them whatever its marker says.
+    if reverted_to_stock; then
+        stage "Coming back from stock: the MCUs will be flashed"
+        rm -f "$STATE_DIR/mcu-firmware.commit"
+    fi
     n=1
     progress "$n" "$total"
     for script in "$scripts"/*.sh; do
