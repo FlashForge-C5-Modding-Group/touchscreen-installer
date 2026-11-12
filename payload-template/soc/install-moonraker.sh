@@ -126,11 +126,20 @@ else
     # linux_mips) but are soft-float: hard-float pip gets its own cache, and
     # the old one goes.
     rm -rf "$HOME/.cache/pip"
+    # Pillow and streaming-form-data come prebuilt (ingenic-hf-python's
+    # wheels.sh): compiling them on the printer can crash its ld/as. A
+    # version Moonraker moves to that isn't here is still built on the printer.
+    WHEELS=$OC_PAYLOAD/soc/wheels
+    set --
+    if ls "$WHEELS"/*.whl >/dev/null 2>&1; then
+        echo "STAGE Using prebuilt wheels: $(cd "$WHEELS" && echo *.whl)"
+        set -- --find-links "$WHEELS"
+    fi
     # SKIP_CYTHON: zeroconf as plain Python, not compiled. Pillow looks for
     # zlib and libjpeg in CFLAGS/LDFLAGS, not in the gcc wrapper's paths.
     oc_run_staged env SKIP_CYTHON=1 CFLAGS="-I$PYHF/include" LDFLAGS="-L$PYHF/lib" \
         PIP_CACHE_DIR="$HOME/.cache/pip-hf" "$MR/moonraker-env/bin/python" -m pip install \
-        --disable-pip-version-check -r "$MR/moonraker/scripts/moonraker-requirements.txt" \
+        --disable-pip-version-check "$@" -r "$MR/moonraker/scripts/moonraker-requirements.txt" \
         || die "Moonraker requirements failed"
     if [ -x /opt/bin/readelf ]; then
         for so in $(find "$MR/moonraker-env" -name '*.so'); do
