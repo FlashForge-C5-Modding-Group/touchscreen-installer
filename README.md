@@ -349,6 +349,11 @@ writable; use an external USB mount for recoverability.
 `make usb` builds the MIPS app and assembles the drive in `dist/usb`. Copy
 everything in that folder to the root of a FAT32 USB drive. `MCU_PACKAGE=path`
 also adds an MCU firmware package (with its `.sha256` and `.manifest.json`).
+It also zips the folder as the release asset, named from `INSTALLER_RELEASE`
+in `scripts/install.sh`: "Public Alpha 7.2" gives
+`dist/OpenCreator-Alpha-7.2.zip`. Releases go on the
+[OpenCreator](https://github.com/FlashForge-C5-Modding-Group/OpenCreator/releases)
+repo as "OpenCreator Alpha 7.2", tagged `0.0.7.2`.
 
 ```text
 runFirmwareExe.sh            # run by the stock app_startup.sh at boot

@@ -27,3 +27,28 @@ find "$OUT" -name '*.sh' -exec sed -i 's/\r$//' {} +
 
 echo "USB files in $OUT:"
 (cd "$OUT" && find . -type f | sort)
+
+# The release zip, named like the OpenCreator releases: "Public Alpha 7.2"
+# in install.sh gives OpenCreator-Alpha-7.2.zip, beside the folder.
+release=$(sed -n 's/^INSTALLER_RELEASE="Public \(.*\)"$/\1/p' "$ROOT/scripts/install.sh")
+[ -n "$release" ] || { echo "no INSTALLER_RELEASE in install.sh" >&2; exit 1; }
+ZIP=$(dirname "$OUT")/OpenCreator-$(echo "$release" | tr ' ' '-').zip
+python3 - "$OUT" "$ZIP" <<'EOF'
+import os, sys, zipfile
+src, out = sys.argv[1:]
+with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
+    for root, dirs, files in os.walk(src):
+        dirs.sort()
+        rel = os.path.relpath(root, src).replace(os.sep, "/")
+        if not files and not dirs:
+            z.writestr(zipfile.ZipInfo(rel + "/"), "")
+        for f in sorted(files):
+            path = os.path.join(root, f)
+            info = zipfile.ZipInfo.from_file(path, f if rel == "." else rel + "/" + f)
+            exe = f.endswith(".sh") or f == "opencreator-installer"
+            info.external_attr = (0o100755 if exe else 0o100644) << 16
+            info.compress_type = zipfile.ZIP_DEFLATED
+            with open(path, "rb") as fh:
+                z.writestr(info, fh.read())
+EOF
+echo "Release zip: $ZIP"
