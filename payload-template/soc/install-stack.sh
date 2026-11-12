@@ -33,7 +33,7 @@ KLIPPER=$OC/klipper
 
 # A fresh Kalico or environment is built next to the current one and
 # only swapped in once everything has worked; an existing Kalico checkout is
-# updated in place (user files such as AFC's links in klippy/extras stay) and
+# updated in place (untracked user files in klippy/extras stay) and
 # reset to its old commit on failure.
 OLD_HEAD=
 rollback() {
