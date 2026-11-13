@@ -12,10 +12,9 @@ packages can stay in the folder. Each package needs:
 <name>.tgz.manifest.json
 ```
 
-This is the encrypted FlashForge update format built by
-[`creator-5-update-creator`](https://github.com/FlashForge-C5-Modding-Group/creator-5-update-creator),
-with the stock MCU images replaced by Kalico builds
-(`MCU_MODE=replacement`). The script decrypts it with the known
+This is the encrypted FlashForge update format built by Kalico's
+[`scripts/build_c5_update.py`](https://github.com/FlashForge-C5-Modding-Group/kalico/blob/something/scripts/build_c5_update.py),
+with the stock MCU images replaced by Kalico builds. The script decrypts it with the known
 Creator 5 Pro update password, extracts the inner `control-*.tar.xz`,
 and flashes each board with the bundled `IAPCommand`/`ISPCommand`
 exactly as a stock firmware update would -- just skipping the

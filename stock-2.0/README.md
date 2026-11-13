@@ -53,4 +53,4 @@ and checks every file FlashForge's `md5sum.list` covers (all of control, the
 boot script, bin, auth, the Klipper scripts and configs) against it before
 packing. Klipper's Python files and firmwareExe come from zips FlashForge's list
 only has whole, so they aren't checked file by file. `start.img` and `end.img`
-(the update screens) come from `creator-5-update-creator/template`.
+(the update screens) are FlashForge's, kept next to this script.

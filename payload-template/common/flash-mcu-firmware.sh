@@ -9,7 +9,7 @@
 #
 # Expects packages at $OC_PAYLOAD/mcu-firmware/*.tgz, each with a
 # matching *.tgz.sha256 and *.tgz.manifest.json sidecar, in the format
-# produced by creator-5-update-creator (MCU_MODE=replacement). For
+# produced by Kalico's scripts/build_c5_update.py. For
 # local testing, copy one of the example packages from the root of the
 # Klipperstuffs workspace (e.g. Creator5Pro-all-mcus-<commit>-<date>.tgz
 # plus its .manifest.json, with a generated .sha256 sidecar) into

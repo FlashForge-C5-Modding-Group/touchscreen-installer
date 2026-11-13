@@ -7,7 +7,7 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 ROOT=$(cd "$HERE/.." && pwd)
 OUT=${1:-$ROOT/dist/stock-2.0-usb}
 ARCHIVES=${OC_FF_ARCHIVES:-$HOME/ffarch}
-TEMPLATE=${OC_FF_TEMPLATE:-$ROOT/../creator-5-update-creator/template}
+TEMPLATE=${OC_FF_TEMPLATE:-$HERE}
 SOFTWARE=2.0.0
 CONTROL=1.3.1
 
