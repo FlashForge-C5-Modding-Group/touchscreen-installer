@@ -116,7 +116,6 @@ every `startup/scripts/*.sh` in the background:
 | `08-mcu-wake.sh` | Wakes MCUs that Klipper can't reach |
 | `10-klipper.sh` | Runs Kalico from `klippy-env` (`-a /tmp/uds`), restarting it if it exits |
 | `20-msmr.sh` | Starts nginx, and runs Moonraker from `moonraker-env` with `-d /usr/data/opencreator/klipper` |
-| `25-fluidd-macros.sh` | Once Moonraker is up, gives Fluidd the OpenCreator macro layout if it has none |
 | `30-camera.sh` | Starts the webcam |
 | `40-grumpyscreen.sh` | Runs GrumpyScreen on the touchscreen's input device, if installed |
 | `99-opencreator-updater.sh` | Merges config template updates |

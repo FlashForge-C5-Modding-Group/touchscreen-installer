@@ -62,9 +62,12 @@ if [ -f "$LOGO" ] && [ -f "$OCDIR/logo.jpeg.installed" ] &&
     ! cmp -s "$LOGO" "$OCDIR/logo.jpeg.installed" && ! cmp -s "$LOGO" "$OCDIR/logo.jpeg.stock"; then
     echo "STAGE Keeping your custom boot logo"
 else
-    echo "STAGE Installing the OpenCreator boot logo"
-    cp "$OC_PAYLOAD/common/logo.jpeg" "$LOGO"
-    cp "$OC_PAYLOAD/common/logo.jpeg" "$OCDIR/logo.jpeg.installed"
+    # the AD5X panel is landscape: its logo is 800x480, the C5's is turned to 480x800
+    NEW_LOGO=$OC_PAYLOAD/common/logo.jpeg
+    [ "${OC_MACHINE:-}" != AD5X ] || NEW_LOGO=$OC_PAYLOAD/common/logo-ad5x.jpeg
+    echo "STAGE Installing the boot logo"
+    cp "$NEW_LOGO" "$LOGO"
+    cp "$NEW_LOGO" "$OCDIR/logo.jpeg.installed"
 fi
 
 echo "STAGE Replacing firmwareExe with the LoopScript launcher"

@@ -33,6 +33,7 @@ static const char *demo_root;
 static lv_obj_t *step_label, *title_label, *body_label, *summary_box;
 static lv_obj_t *spinner, *status_label, *button_row;
 static lv_obj_t *brand_label, *splash_logo, *notice_label, *progress_bar;
+static lv_obj_t *splash_name;
 static lv_obj_t *log_panel, *log_view, *log_label;
 static pid_t child_pid = -1;
 static int child_fd = -1;
@@ -154,6 +155,16 @@ static const char *model_name(void)
     if (strcmp(machine, "Creator5") == 0) return "Creator 5";
     if (strcmp(machine, "AD5X") == 0) return "AD5X";
     return "Unknown model";
+}
+
+static bool is_ad5x(void)
+{
+    return strcmp(machine, "AD5X") == 0;
+}
+
+static const char *project_name(void)
+{
+    return is_ad5x() ? "OpenAD5X" : "OpenCreator";
 }
 
 static void set_title(enum page p, const char *text)
@@ -281,7 +292,7 @@ static void format_duration(char *buf, size_t size, unsigned secs);
 static void update_brand(void)
 {
     static char buf[64];
-    snprintf(buf, sizeof(buf), "OPENCREATOR  |  %s", model_name());
+    snprintf(buf, sizeof(buf), "%s  |  %s", is_ad5x() ? "OPENAD5X" : "OPENCREATOR", model_name());
     lv_label_set_text(brand_label, buf);
 }
 
@@ -579,6 +590,7 @@ static void show_page(enum page next)
     lv_obj_add_flag(progress_bar, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(notice_label, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(splash_logo, LV_OBJ_FLAG_HIDDEN);
+    if (splash_name) lv_obj_add_flag(splash_name, LV_OBJ_FLAG_HIDDEN);
     lv_obj_clean(summary_box);
 
     int step, total;
@@ -621,19 +633,26 @@ static void show_page(enum page next)
 
     switch (next) {
     case PAGE_CHECK:
-        set_title(next, "OpenCreator installer");
+        set_title(next, is_ad5x() ? "OpenAD5X installer" : "OpenCreator installer");
         lv_label_set_text(body_label, "Checking the printer...");
         lv_obj_clear_flag(splash_logo, LV_OBJ_FLAG_HIDDEN);
+        if (splash_name) lv_obj_clear_flag(splash_name, LV_OBJ_FLAG_HIDDEN);
         break;
     case PAGE_KERNEL:
         set_title(next, "Unsupported FlashForge firmware");
         {
             static char buf[480];
-            snprintf(buf, sizeof(buf),
-                     "This printer's kernel package is %s. OpenCreator needs kernel package "
-                     "2.0.1 to 2.0.7 to enable legacy NaN for Entware (FlashForge 1.9.9 has 2.0.7). "
-                     "Install the stock 1.9.9 update from FlashForge, then run this installer again. "
-                     "Nothing has been changed.", kernel_text);
+            if (is_ad5x())
+                snprintf(buf, sizeof(buf),
+                         "This printer's kernel package is %s. OpenAD5X needs kernel package "
+                         "2.0.1 to enable legacy NaN for Entware; it is the only AD5X kernel it has "
+                         "been tested on. Nothing has been changed.", kernel_text);
+            else
+                snprintf(buf, sizeof(buf),
+                         "This printer's kernel package is %s. OpenCreator needs kernel package "
+                         "2.0.1 to 2.0.7 to enable legacy NaN for Entware (FlashForge 1.9.9 has 2.0.7). "
+                         "Install the stock 1.9.9 update from FlashForge, then run this installer again. "
+                         "Nothing has been changed.", kernel_text);
             lv_label_set_text(body_label, buf);
         }
         add_button("Check again", "restart");
@@ -645,10 +664,12 @@ static void show_page(enum page next)
             lv_label_set_text(body_label,
                 "The printer is online. Pick another network to switch to it.");
         } else {
+            static char buf[200];
             set_title(next, "No internet connection");
-            lv_label_set_text(body_label,
-                "OpenCreator downloads everything it installs, so the printer needs internet. "
-                "Pick your Wi-Fi network, or Quit to start the printer normally.");
+            snprintf(buf, sizeof(buf), "%s downloads everything it installs, so the printer needs "
+                     "internet. Pick your Wi-Fi network, or Quit to start the printer normally.",
+                     project_name());
+            lv_label_set_text(body_label, buf);
         }
         lv_obj_clean(wifi_list);
         lv_obj_clear_flag(wifi_list, LV_OBJ_FLAG_HIDDEN);
@@ -703,21 +724,26 @@ static void show_page(enum page next)
         break;
     case PAGE_UPDATE:
         {
-            static char title[160], from_to[96], setup[96];
+            static char title[160], from_to[96], setup[96], body[200];
             bool tunnel = strcmp(prev_mode, "tunnel") == 0;
             snprintf(title, sizeof(title), "Update available:  %s  " LV_SYMBOL_RIGHT "  %s",
                      prev_version, release_name[0] ? release_name : installer_version);
             set_title(next, title);
-            lv_label_set_text(body_label,
-                "Updates OpenCreator in place with your current setup. Your configs and "
-                "files are kept; OpenCreator files you changed are saved to the backup.");
+            snprintf(body, sizeof(body), "Updates %s in place with your current setup. Your configs "
+                     "and files are kept; %s files you changed are saved to the backup.",
+                     project_name(), project_name());
+            lv_label_set_text(body_label, body);
             lv_obj_clear_flag(summary_box, LV_OBJ_FLAG_HIDDEN);
             add_summary_row("Installed", prev_version);
             snprintf(from_to, sizeof(from_to), "%s (new)", release_label(installer_version));
             add_summary_row("This installer", from_to);
-            snprintf(setup, sizeof(setup), "%s%s%s, touchscreen %s",
-                     tunnel ? "Tunneled" : "Printer SoC", tunnel ? "" : ", ",
-                     tunnel ? "" : prev_web, strcmp(prev_touch, "yes") == 0 ? "on" : "off");
+            if (is_ad5x())
+                snprintf(setup, sizeof(setup), "%s, touchscreen %s",
+                         prev_web, strcmp(prev_touch, "yes") == 0 ? "on" : "off");
+            else
+                snprintf(setup, sizeof(setup), "%s%s%s, touchscreen %s",
+                         tunnel ? "Tunneled" : "Printer SoC", tunnel ? "" : ", ",
+                         tunnel ? "" : prev_web, strcmp(prev_touch, "yes") == 0 ? "on" : "off");
             add_summary_row("Setup kept", setup);
             if (warn_text[0]) {
                 lv_label_set_text_static(notice_label, warn_text);
@@ -735,7 +761,7 @@ static void show_page(enum page next)
         }
         break;
     case PAGE_INSTALLED:
-        set_title(next, "OpenCreator is up to date");
+        set_title(next, is_ad5x() ? "OpenAD5X is up to date" : "OpenCreator is up to date");
         {
             static char buf[400];
             snprintf(buf, sizeof(buf),
@@ -744,7 +770,8 @@ static void show_page(enum page next)
                      "setup again. Update Configs lets you pick the settings again and only "
                      "changes what is different.",
                      release_name[0] ? release_name : prev_version,
-                     strcmp(prev_mode, "soc") == 0 ? "printer SoC" : "tunneled",
+                     is_ad5x() ? "on the printer"
+                         : strcmp(prev_mode, "soc") == 0 ? "printer SoC" : "tunneled",
                      prev_web, prev_touch);
             lv_label_set_text(body_label, buf);
         }
@@ -759,8 +786,12 @@ static void show_page(enum page next)
         if (stock_found[0]) add_button(LV_SYMBOL_REFRESH "  Rollback to stock", "rollback-confirm");
         break;
     case PAGE_MODE:
-        set_title(next, "Where should Klipper run?");
-        {
+        set_title(next, is_ad5x() ? "Install on the printer" : "Where should Klipper run?");
+        if (is_ad5x()) {
+            lv_label_set_text(body_label, update_configs
+                ? "Currently: on the printer."
+                : "Klipper, Moonraker and the web interface run on the printer itself.");
+        } else {
             static char buf[320];
             snprintf(buf, sizeof(buf), "%s%s%s%s",
                      update_configs
@@ -778,8 +809,10 @@ static void show_page(enum page next)
         }
         if (installed_same) add_button("Back", "home");
         else if (update_available && model_known) add_button("Back", "update-home");
-        add_button("On printer SoC", "soc");
-        {
+        if (is_ad5x()) {
+            add_button("Continue", "soc");
+        } else {
+            add_button("On printer SoC", "soc");
             lv_obj_t *tunnel = add_button("Tunneled", "tunnel");
             if (tunnel_blocked) disable_button(tunnel);
         }
@@ -852,7 +885,8 @@ static void show_page(enum page next)
         );
         lv_obj_clear_flag(summary_box, LV_OBJ_FLAG_HIDDEN);
         add_summary_row("Printer", model_name());
-        add_summary_row("Mode", strcmp(mode, "soc") == 0 ? "Printer SoC" : "Tunneled SBC");
+        if (!is_ad5x())
+            add_summary_row("Mode", strcmp(mode, "soc") == 0 ? "Printer SoC" : "Tunneled SBC");
         if (strcmp(mode, "soc") == 0) add_summary_row("Web UI", web);
         add_summary_row("Touchscreen",
                          strcmp(touchscreen, "yes") == 0 ? "GrumpyScreen" : "None");
@@ -897,10 +931,10 @@ static void show_page(enum page next)
             static char buf[1024];
             snprintf(buf, sizeof(buf),
                      "Only FlashForge's firmwareExe is put back, from:\n%s\n"
-                     "Everything OpenCreator runs is started by its own firmwareExe, so "
-                     "after a reboot the printer runs the stock firmware. OpenCreator's "
+                     "Everything %s runs is started by its own firmwareExe, so "
+                     "after a reboot the printer runs the stock firmware. %s's "
                      "files stay on the printer; install again to go back. MCU firmware "
-                     "is not rolled back.", stock_found);
+                     "is not rolled back.", stock_found, project_name(), project_name());
             lv_label_set_text(body_label, buf);
         }
         add_button("Back", "start");
@@ -940,6 +974,9 @@ static void show_page(enum page next)
                   "have written at " OC_DEMO_INSTALL_ROOT "."
                 : reconfiguring
                 ? "Reboot to start with the new settings, and unplug the installer USB drive."
+                : is_ad5x()
+                ? "Reboot to start OpenAD5X. Unplug the installer USB drive once you're "
+                  "done -- leaving it plugged in risks it being picked up again on the next boot."
                 : "Reboot to start OpenCreator. Unplug the installer USB drive once you're "
                   "done -- leaving it plugged in risks it being picked up again on the next boot.");
             if (strcmp(mode, "tunnel") == 0 && strcmp(touchscreen, "yes") == 0) {
@@ -1281,12 +1318,23 @@ static int show_splash(const char *message, bool wait)
     lv_img_set_src(logo, &oc_logo_large);
     lv_obj_set_style_img_recolor(logo, lv_color_hex(OC_COLOR_LOGO), 0);
     lv_obj_set_style_img_recolor_opa(logo, LV_OPA_COVER, 0);
-    lv_obj_align(logo, LV_ALIGN_CENTER, 0, message ? -24 : 0);
+    const char *env_machine = getenv("OC_MACHINE");
+    bool ad5x = env_machine && strcmp(env_machine, "AD5X") == 0;
+    lv_obj_align(logo, LV_ALIGN_CENTER, 0, (message ? -24 : 0) - (ad5x ? 20 : 0));
+    lv_obj_t *anchor = logo;
+    if (ad5x) {
+        lv_obj_t *name = lv_label_create(screen);
+        lv_label_set_text(name, "OpenAD5X");
+        lv_obj_set_style_text_font(name, &lv_font_montserrat_24, 0);
+        lv_obj_set_style_text_color(name, lv_color_hex(OC_COLOR_LOGO), 0);
+        lv_obj_align_to(name, logo, LV_ALIGN_OUT_BOTTOM_MID, 0, 16);
+        anchor = name;
+    }
     if (message) {
         lv_obj_t *label = lv_label_create(screen);
         lv_label_set_text(label, message);
         lv_obj_set_style_text_color(label, lv_color_hex(OC_COLOR_MUTED), 0);
-        lv_obj_align_to(label, logo, LV_ALIGN_OUT_BOTTOM_MID, 0, 24);
+        lv_obj_align_to(label, anchor, LV_ALIGN_OUT_BOTTOM_MID, 0, 24);
     }
     if (!wait) {
         lv_refr_now(NULL);
@@ -1401,6 +1449,18 @@ int main(int argc, char **argv)
     lv_obj_set_style_img_recolor_opa(splash_logo, LV_OPA_COVER, 0);
     lv_obj_align(splash_logo, LV_ALIGN_CENTER, 0, 14);
     lv_obj_add_flag(splash_logo, LV_OBJ_FLAG_HIDDEN);
+    {
+        const char *env_machine = getenv("OC_MACHINE");
+        if (env_machine && strcmp(env_machine, "AD5X") == 0) {
+            lv_obj_align(splash_logo, LV_ALIGN_CENTER, 0, -6);
+            splash_name = lv_label_create(screen);
+            lv_label_set_text(splash_name, "OpenAD5X");
+            lv_obj_set_style_text_font(splash_name, &lv_font_montserrat_24, 0);
+            lv_obj_set_style_text_color(splash_name, lv_color_hex(OC_COLOR_LOGO), 0);
+            lv_obj_align_to(splash_name, splash_logo, LV_ALIGN_OUT_BOTTOM_MID, 0, 16);
+            lv_obj_add_flag(splash_name, LV_OBJ_FLAG_HIDDEN);
+        }
+    }
 
     notice_label = lv_label_create(screen);
     lv_obj_set_width(notice_label, width - 60);
