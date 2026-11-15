@@ -486,6 +486,9 @@ not a failed install.
 `printer.dryer.cfg`; `printer.base.cfg` loads `printer.accessory.*.cfg`, so
 without a dryer nothing about it is loaded. A file from an earlier install is
 kept when the dryer doesn't answer this time. Demo runs skip the check.
+While that file exists, opencreator-fs's `25-fluidd-macros.sh` puts every
+`C5_DRYER_*` macro in a Fluidd category called "VDS Macros" at boot. Macros the
+user has already placed somewhere else stay where they are.
 
 ## Root login
 
