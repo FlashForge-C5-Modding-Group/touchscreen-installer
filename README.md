@@ -123,6 +123,11 @@ every `startup/scripts/*.sh` in the background:
 `tunneled.sh` runs `05-entfix.sh`, `06-sftp.sh`, the camera and GrumpyScreen, then the socat
 bridge in a restart loop.
 
+On the AD5X the boot files come from AD5X-FS and live in `/usr/data/openad5x`.
+`firmwareExe` starts the network from `Adventurer5M.json` (Wi-Fi, Ethernet, hotspot or a
+manual address); there is no coprocessor and no `tunneled.sh`. Moonraker and nginx are
+started by `20-moonraker.sh` and `25-nginx.sh`, with `-d /usr/data/openad5x/klipper`.
+
 ## Printer model detection
 
 The `check` step reads `MACHINE=` and `PID=` from the stock
