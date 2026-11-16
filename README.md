@@ -1,6 +1,6 @@
 # OpenCreator installer
 
-An LVGL 8.3 touchscreen installer for the Creator 5. The application renders
+An LVGL 8.3 touchscreen installer for the Creator 5 and the AD5X. The application renders
 directly to `/dev/fb0` and reads `/dev/input/event0`; it does not require X11,
 SDL, or GrumpyScreen. LVGL is pinned as a Git submodule at `vendor/lvgl`.
 
@@ -32,6 +32,9 @@ touchscreen choice, UTC time, and backup location.
 
 ## What each mode installs
 
+On the AD5X, `/usr/data/opencreator` below is `/usr/data/openad5x`, and
+opencreator-fs is AD5X-FS.
+
 Both modes start with:
 
 1. **Entware** (`common/install-entware.sh`), as in the Creator-5-Mods
@@ -52,12 +55,15 @@ Both modes start with:
    turn counter-clockwise, since the panel's framebuffer is portrait. The stock
    logo is kept as `/usr/data/opencreator/logo.jpeg.stock` and in the backup.
    `/etc/logo.jpeg` (used when `/usr/prog/logo.jpeg` is missing) is left alone.
-3. **MCU firmware**, last of all (`95-flash-mcu-firmware.sh`), from the package
+3. **MCU firmware** (`95-flash-mcu-firmware.sh`), from the package
    on the drive named for the printer: `Creator5Pro-*.tgz` on a Creator 5 Pro,
    `Creator5-*.tgz` on a Creator 5, as the stock USB update does. Build them
    with Kalico's `scripts/build_c5_update.py all` (one `--template`/`--output`
    pair per model; it needs `C5_UPDATE_PASSPHRASE`) and add them with
    `MCU_PACKAGE="Creator5Pro-....tgz Creator5-....tgz" make usb`.
+   On the AD5X the images come from AD5X-FS's `mcu-firmware/ad5x` instead and are
+   flashed with `ad5x-mcu-flash`: the mainboard and IFS live, the eboard at the
+   next power cycle.
    If a board fails to flash, `/usr/data/logs/` is copied to the drive as
    `opencreator/logs/mcu-flash-<date>-<time>/`. On FlashForge kernel 2.0.8 the
    boards aren't flashed during the install: the checked firmware is left in
@@ -138,6 +144,7 @@ The `check` step reads `MACHINE=` and `PID=` from the stock
 |---------------|---------------|--------|
 | Creator 5     | `Creator5`    | `0028` |
 | Creator 5 Pro | `Creator5Pro` | `0029` |
+| AD5X          | `AD5X`        | `0026` |
 
 The detected model is shown in the header and on the Ready page, and is passed
 to every payload script as `OC_MACHINE` and `OC_PID`. If neither pair is found,
@@ -155,6 +162,8 @@ package (`/usr/prog/PROGRAM/kernel/<version>`):
 | 2.0.1 to 2.0.6 | `0x00a130d1` |
 | 2.0.7 (FlashForge 1.9.9) | `0x00B330D1` |
 | 2.0.8 (FlashForge 2.0.0) | `0x00B030D1` |
+
+On the AD5X only kernel package 2.0.1 is accepted (`0x00a130d1`).
 
 On any other package the installer stops on *Unsupported FlashForge firmware*,
 and LoopScript's `01-fixnan.sh` writes nothing. `OC_KERNEL_PACKAGE` overrides
