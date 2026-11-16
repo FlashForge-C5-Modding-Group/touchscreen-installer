@@ -14,6 +14,12 @@ LOG=$DEMO_ROOT/usr/data/logs/oc-camera-firmware.log
 
 warn() { echo "WARN Camera firmware not updated: $*"; exit 0; }
 
+# Creator 5 camera firmware only
+if [ "${OC_MACHINE:-}" = AD5X ]; then
+    echo "STAGE Camera firmware: AD5X, skipping"
+    exit 0
+fi
+
 camera_version() {
     for d in "$DEMO_ROOT"/sys/bus/usb/devices/*; do
         [ "$(cat "$d/idVendor" 2>/dev/null)" = 05a3 ] &&
