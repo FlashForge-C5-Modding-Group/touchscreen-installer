@@ -336,7 +336,7 @@ check() {
         printf 'MODEL %s %s\n' "$MACHINE" "$PID"
     else
         printf 'MODEL unknown unknown\n'
-        warn "Printer model not detected (expected Creator5 or Creator5Pro in /usr/prog/app_startup.sh)"
+        warn "Printer model not detected (expected Creator5, Creator5Pro or AD5X in /usr/prog/app_startup.sh)"
     fi
     if kernel_supported; then
         printf 'KERNEL OK %s\n' "$KERNEL_PACKAGE"
@@ -354,6 +354,11 @@ check() {
     [ -z "$manifest" ] ||
         mcu=$(sed -n 's/.*"commit": *"\([0-9a-f]\{7,40\}\)".*/\1/p' "${manifest#* }" | head -n 1)
     flashed=$(head -n 1 "$STATE_DIR/mcu-firmware.commit" 2>/dev/null) || flashed=
+    # AD5X: the images come with the AD5X-FS clone, the updater records what it flashed
+    if [ "${MACHINE:-}" = AD5X ]; then
+        mcu=$(head -n 1 "$DEMO_ROOT$OC_HOME/ad5x-fs/mcu-firmware/ad5x/VERSION" 2>/dev/null)
+        flashed=$(head -n 1 "$DEMO_ROOT$OC_HOME/klipper/config/.opencreator-updater/mcu-flashed" 2>/dev/null)
+    fi
     flashed=${flashed:-none}
     printf 'MCU %s %s\n' "${mcu:-none}" "$flashed"
     if [ -f "$INSTALL_STATE" ]; then
