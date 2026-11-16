@@ -30,5 +30,5 @@ fi
 if grep -q ' /usr/sbin/dropbear ' /proc/mounts; then
     echo "STAGE SFTP enabled on port 22 (same login as SSH)"
 else
-    echo "WARN SFTP could not be enabled; see /tmp/opencreator.log"
+    echo "WARN SFTP could not be enabled; see /tmp/${OC_HOME##*/}.log"
 fi

@@ -2,7 +2,7 @@
 # Printer SoC mode: current Moonraker in /usr/prog/moonraker/moonraker with
 # a virtualenv on the hard-float Python in /usr/data/python-hf. pip builds
 # its C extensions with python-hf's gcc wrapper, so they are hard-float too.
-# LoopScript's 20-msmr.sh starts it with -d $OC_HOME/klipper.
+# LoopScript's 20-msmr.sh (Creator 5) or 20-moonraker.sh (AD5X) starts it with -d $OC_HOME/klipper.
 set -eu
 : "${OC_PAYLOAD:?}"
 : "${OC_BACKUP:?}"

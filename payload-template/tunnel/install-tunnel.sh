@@ -9,7 +9,7 @@ DEMO_ROOT=${OC_DEMO_ROOT:-}
 
 TUNNEL_REPO=${OC_TUNNEL_REPO:-https://github.com/FlashForge-C5-Modding-Group/opencreator-tunnel.git}
 BRIDGE_DIR=$DEMO_ROOT/usr/prog/c5-tunnel-socat
-TUNNELED_SCRIPT=$DEMO_ROOT/usr/data/opencreator/tunneled/tunneled.sh
+TUNNELED_SCRIPT=$DEMO_ROOT$OC_HOME/tunneled/tunneled.sh
 
 die() { echo "ERROR $*"; exit 1; }
 

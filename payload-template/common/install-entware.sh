@@ -4,7 +4,7 @@
 # packages the chosen mode needs.
 set -eu
 : "${OC_MODE:?}"
-: "${OC_NAN_ADDR?}" # empty on machines with no legacy-NaN switch (AD5X)
+: "${OC_NAN_ADDR?}" # empty when the kernel package's legacy-NaN address is not known
 DEMO_ROOT=${OC_DEMO_ROOT:-}
 : "${OC_PAYLOAD:?}"
 . "$OC_PAYLOAD/common/install-helpers.sh"
