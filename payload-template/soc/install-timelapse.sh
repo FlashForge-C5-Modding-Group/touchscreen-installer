@@ -31,6 +31,13 @@ fi
 
 [ -d "$COMPONENTS" ] || die "Moonraker is not installed ($COMPONENTS)"
 ln -sf "$TL/component/timelapse.py" "$COMPONENTS/timelapse.py"
+# keeps Moonraker's update manager from reporting it as an untracked file
+MR_GIT=$DEMO_ROOT/usr/prog/moonraker/moonraker/.git
+if [ -d "$MR_GIT" ]; then
+    mkdir -p "$MR_GIT/info"
+    grep -qx '/moonraker/components/timelapse.py' "$MR_GIT/info/exclude" 2>/dev/null ||
+        echo '/moonraker/components/timelapse.py' >> "$MR_GIT/info/exclude"
+fi
 mkdir -p "$CONFIG"
 ln -sf "$TL/klipper_macro/timelapse.cfg" "$CONFIG/timelapse.cfg"
 mkdir -p "$DEMO_ROOT$OUT/frames"
@@ -54,11 +61,11 @@ fi
 chmod 755 "$FFMPEG"
 
 # The include goes first: the end of printer.cfg is Klipper's SAVE_CONFIG
-# block. A kept printer.cfg lacks it, or has it lower down.
+# block. The AD5X printer.cfg already has it; an older kept printer.cfg lacks it.
 PRINTER_CFG=$CONFIG/printer.cfg
-if [ -f "$PRINTER_CFG" ] && [ "$(head -n 1 "$PRINTER_CFG")" != '[include timelapse*.cfg]' ]; then
+if [ -f "$PRINTER_CFG" ] && ! grep -qx '\[include timelapse\*\.cfg\]' "$PRINTER_CFG"; then
     echo "STAGE Adding the timelapse macros to the top of printer.cfg"
-    { echo '[include timelapse*.cfg]'; grep -v '^\[include timelapse\*\.cfg\]$' "$PRINTER_CFG"; } \
+    { echo '[include timelapse*.cfg]'; cat "$PRINTER_CFG"; } \
         > "$PRINTER_CFG.new" && mv "$PRINTER_CFG.new" "$PRINTER_CFG"
 fi
 

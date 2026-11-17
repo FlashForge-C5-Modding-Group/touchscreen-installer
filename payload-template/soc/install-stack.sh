@@ -128,6 +128,9 @@ while IFS= read -r file; do
         kept=$((kept + 1))
     else
         cp -p "$TEMPLATE/$file" "$OC/config/$file"
+        # the updater merges later updates from this copy
+        mkdir -p "$(dirname "$OC/config/.opencreator-updater/base/$file")"
+        cp -p "$TEMPLATE/$file" "$OC/config/.opencreator-updater/base/$file"
         added=$((added + 1))
     fi
 done < "$WORK/files"
