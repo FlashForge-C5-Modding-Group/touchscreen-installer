@@ -15,10 +15,10 @@ LDFLAGS += -pthread
 LDLIBS += -lm
 
 LVGL_SOURCES := $(shell find $(LVGL_DIR)/$(LVGL_DIR_NAME)/src -name '*.c' -print)
-SOURCES := src/main.c src/platform.c src/logo.c $(LVGL_SOURCES)
+SOURCES := src/main.c src/platform.c src/logo.c src/logo_ad5x.c $(LVGL_SOURCES)
 OBJECTS := $(patsubst %.c,$(BUILD_DIR)/%.o,$(SOURCES))
 
-.PHONY: all mips32 sdl usb logo clean
+.PHONY: all mips32 sdl usb logo logo-ad5x clean
 all: $(BUILD_DIR)/opencreator-installer
 mips32:
 	$(MAKE) CROSS_COMPILE=$(INGENIC_TOOLCHAIN)/bin/mips-xburst2-linux-gnu- \
@@ -28,7 +28,7 @@ sdl:
 	$(MAKE) BUILD_DIR=build/sdl CC=gcc \
 	  CPPFLAGS="$(CPPFLAGS) $$(pkg-config --cflags sdl2)" \
 	  CFLAGS="$(CFLAGS) -DOC_DEMO" \
-	  SOURCES="src/main.c src/platform_sdl.c src/logo.c $(LVGL_SOURCES)" \
+	  SOURCES="src/main.c src/platform_sdl.c src/logo.c src/logo_ad5x.c $(LVGL_SOURCES)" \
 	  LDLIBS="$(LDLIBS) $$(pkg-config --libs sdl2)" all
 
 usb: mips32
@@ -47,3 +47,7 @@ clean:
 
 logo: opencreator-oc-white.svg scripts/gen-logo.py
 	python3 scripts/gen-logo.py opencreator-oc-white.svg src/logo.c
+
+# The AD5X's OA mark: installer layers (src/logo_ad5x.c) and its boot logo
+logo-ad5x: scripts/gen-logo-ad5x.py
+	python3 scripts/gen-logo-ad5x.py

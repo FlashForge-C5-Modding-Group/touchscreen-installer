@@ -12,6 +12,7 @@
 #include <unistd.h>
 #include "lvgl/lvgl.h"
 #include "logo.h"
+#include "logo_ad5x.h"
 #include "platform.h"
 
 enum page { PAGE_CHECK, PAGE_MODE, PAGE_WEB, PAGE_TOUCHSCREEN, PAGE_READY,
@@ -109,6 +110,7 @@ static FILE *log_files[2];
 #define OC_COLOR_MUTED    0x8894a3
 #define OC_COLOR_TEXT     0xe9edf2
 #define OC_COLOR_LOGO     0xf5f2ec
+#define OC_COLOR_LOGO_O   0xff5722  /* the O of the AD5X's OA mark */
 
 /* Steps shown in the breadcrumb depend on the branch taken: Tunnel
  * skips the web UI and touchscreen questions that SoC mode asks. */
@@ -160,6 +162,19 @@ static const char *model_name(void)
 static bool is_ad5x(void)
 {
     return strcmp(machine, "AD5X") == 0;
+}
+
+/* The AD5X's OA mark is two layers: the O in orange, and the A on top of it
+ * (a child image of the same size) in the logo colour. */
+static void set_ad5x_logo(lv_obj_t *img, bool large)
+{
+    lv_img_set_src(img, large ? &ad5x_logo_large_o : &ad5x_logo_small_o);
+    lv_obj_set_style_img_recolor(img, lv_color_hex(OC_COLOR_LOGO_O), 0);
+    lv_obj_set_style_img_recolor_opa(img, LV_OPA_COVER, 0);
+    lv_obj_t *a = lv_img_create(img);
+    lv_img_set_src(a, large ? &ad5x_logo_large_a : &ad5x_logo_small_a);
+    lv_obj_set_style_img_recolor(a, lv_color_hex(OC_COLOR_LOGO), 0);
+    lv_obj_set_style_img_recolor_opa(a, LV_OPA_COVER, 0);
 }
 
 static const char *project_name(void)
@@ -1320,6 +1335,7 @@ static int show_splash(const char *message, bool wait)
     lv_obj_set_style_img_recolor_opa(logo, LV_OPA_COVER, 0);
     const char *env_machine = getenv("OC_MACHINE");
     bool ad5x = env_machine && strcmp(env_machine, "AD5X") == 0;
+    if (ad5x) set_ad5x_logo(logo, true);
     lv_obj_align(logo, LV_ALIGN_CENTER, 0, (message ? -24 : 0) - (ad5x ? 20 : 0));
     lv_obj_t *anchor = logo;
     if (ad5x) {
@@ -1410,6 +1426,10 @@ int main(int argc, char **argv)
     lv_img_set_src(header_logo, &oc_logo_small);
     lv_obj_set_style_img_recolor(header_logo, lv_color_hex(OC_COLOR_LOGO), 0);
     lv_obj_set_style_img_recolor_opa(header_logo, LV_OPA_COVER, 0);
+    {
+        const char *env_machine = getenv("OC_MACHINE");
+        if (env_machine && strcmp(env_machine, "AD5X") == 0) set_ad5x_logo(header_logo, false);
+    }
     lv_obj_align(header_logo, LV_ALIGN_TOP_LEFT, 30, 10);
 
     brand_label = lv_label_create(screen);
@@ -1452,6 +1472,7 @@ int main(int argc, char **argv)
     {
         const char *env_machine = getenv("OC_MACHINE");
         if (env_machine && strcmp(env_machine, "AD5X") == 0) {
+            set_ad5x_logo(splash_logo, true);
             lv_obj_align(splash_logo, LV_ALIGN_CENTER, 0, -6);
             splash_name = lv_label_create(screen);
             lv_label_set_text(splash_name, "OpenAD5X");
