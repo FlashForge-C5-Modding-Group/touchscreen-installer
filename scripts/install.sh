@@ -39,6 +39,10 @@ STATE_DIR=${OC_STATE_DIR:-"$DEMO_ROOT$OC_HOME"}
 INSTALL_STATE=$STATE_DIR/install.json
 INSTALLER_VERSION=0.0.2
 INSTALLER_RELEASE="Public Alpha 2"
+if [ "$early_machine" = AD5X ]; then
+    INSTALLER_VERSION=0.0.1
+    INSTALLER_RELEASE="Public Alpha 1"
+fi
 MIN_FREE_KB=${OC_MIN_FREE_KB:-262144}
 BACKUP_FOLDERS="usr/prog/PROGRAM/software/firmwareExe usr/prog/moonraker ${OC_HOME#/}
 usr/data/mainsail usr/data/fluidd usr/data/nginx usr/prog/c5-tunnel-socat
