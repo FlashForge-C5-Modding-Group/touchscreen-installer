@@ -74,6 +74,7 @@ sync
 
 [ ! -f /usr/data/opencreator/install.json ] || \
     mv /usr/data/opencreator/install.json /usr/data/opencreator/install.json.rolled-back
+rm -f /etc/profile.d/opencreator.sh
 rm -rf "$WORK"
 # Done once: the next boot flashes the MCUs instead of running this again.
 mv "$USB/runFirmwareExe.sh" "$USB/runFirmwareExe.sh.done"

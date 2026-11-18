@@ -730,6 +730,10 @@ stock_firmware_exe() {
     done
     return 1
 }
+# OpenCreator's login banner hook lives in /etc, outside /usr/data
+remove_login_hook() {
+    rm -f "$DEMO_ROOT/etc/profile.d/opencreator.sh"
+}
 rollback_stock() {
     [ -n "$DEMO_ROOT" ] || [ "$(id -u)" -eq 0 ] || die "rollback requires root"
     FE=$DEMO_ROOT/usr/prog/PROGRAM/software/firmwareExe
@@ -744,6 +748,7 @@ rollback_stock() {
     progress 1 2
     # Without the record the next installer run offers a fresh install.
     [ ! -f "$INSTALL_STATE" ] || mv "$INSTALL_STATE" "$INSTALL_STATE.rolled-back"
+    remove_login_hook
     sync
     progress 2 2
     stage "Rolled back to stock; reboot to start FlashForge's firmware"
@@ -846,6 +851,7 @@ stock_reset() {
     sync
     progress 4 5
     [ ! -f "$INSTALL_STATE" ] || mv "$INSTALL_STATE" "$INSTALL_STATE.rolled-back"
+    remove_login_hook
     rm -rf "$WORK"
     sync
     progress 5 5
