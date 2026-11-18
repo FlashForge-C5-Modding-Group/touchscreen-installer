@@ -32,8 +32,8 @@ if [ -z "$DEMO_ROOT" ]; then
 fi
 STATE_DIR=${OC_STATE_DIR:-"$DEMO_ROOT/usr/data/opencreator"}
 INSTALL_STATE=$STATE_DIR/install.json
-INSTALLER_VERSION=0.0.7.5
-INSTALLER_RELEASE="Public Alpha 7.4"
+INSTALLER_VERSION=0.0.7.6
+INSTALLER_RELEASE="Public Alpha 7.5"
 MIN_FREE_KB=${OC_MIN_FREE_KB:-262144}
 BACKUP_FOLDERS="usr/prog/PROGRAM/software/firmwareExe usr/prog/moonraker usr/data/opencreator
 usr/data/mainsail usr/data/fluidd usr/data/nginx usr/prog/c5-tunnel-socat
@@ -643,7 +643,7 @@ reconfigure() {
     if [ "$MODE" != "$old_mode" ]; then
         stage "Switching from $old_mode to $MODE"
         if [ "$MODE" = tunnel ]; then
-            steps="installers/tunnel/01-install-entware.sh installers/tunnel/10-install-tunnel.sh"
+            steps="installers/tunnel/01-install-entware.sh installers/tunnel/05-install-python.sh installers/tunnel/10-install-tunnel.sh"
         else
             steps="installers/soc/01-install-entware.sh installers/soc/02-install-loopscript.sh installers/soc/05-install-python.sh"
             [ -f "$OC/klipper/klipper/klippy/klippy.py" ] && [ -x "$OC/klipper/klippy-env/bin/python" ] ||

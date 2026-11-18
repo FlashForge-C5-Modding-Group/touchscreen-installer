@@ -120,6 +120,9 @@ SoC mode then installs:
 
 Tunnel mode then installs:
 
+- **Hard-float Python** (`soc/install-python.sh`), as in SoC mode, in
+  `/usr/data/python-hf`. `oc-plugin` and `oc-tunneled` run on it; the printer's own Python 3.8 is only a
+  fallback.
 - **The socat bridge** (`tunnel/install-tunnel.sh`): `c5_socat.py` from
   opencreator-tunnel's `printer-socat` in `/usr/prog/c5-tunnel-socat`, with
   `identify_monitor` built by Entware's gcc and the bundled usb-serial modules

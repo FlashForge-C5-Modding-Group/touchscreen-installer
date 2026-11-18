@@ -1,6 +1,6 @@
 #!/bin/sh
-# Printer SoC mode: the hard-float Python in /usr/data/python-hf (an
-# opencreator-fs release asset) that Kalico and Moonraker run on. Skipped
+# The hard-float Python in /usr/data/python-hf (an opencreator-fs release asset): Kalico and
+# Moonraker run on it in SoC mode, oc-plugin and oc-tunneled in tunnel mode. Skipped
 # when the same release is already installed.
 set -eu
 : "${OC_PAYLOAD:?}"
