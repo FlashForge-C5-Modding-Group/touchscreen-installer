@@ -336,10 +336,11 @@ requirements would build numpy from source on the printer. Both modes have
 `30-install-grumpyscreen.sh`, which runs `soc/installgrumpy.sh` when the
 touchscreen was chosen: it downloads the latest GrumpyScreen release and checks
 that it is an ELF binary. `31-install-helixscreen.sh` runs `soc/installhelix.sh`
-for HelixScreen: it takes the newest release, betas included, of its AD5X
-build (the AD5X has the same Ingenic X2600, and the binaries are static),
-unpacks it to `/usr/data/helixscreen`, keeps its settings over an update, and
-adds it to Moonraker's update manager on the beta channel. Only one of the two
+for HelixScreen: it takes the newest release, betas included, of its MIPS
+build (static binaries; only the 1.1 prereleases ship it), unpacks it to
+`/usr/data/helixscreen`, keeps its settings over an update, and adds it to
+Moonraker's update manager on the beta channel, moving an existing entry off
+`stable` (stable releases have no MIPS build, so the updater finds nothing). Only one of the two
 runs: each step turns the other one off by clearing its executable bit, as
 Update Configs does. Everything except the MCU firmware package (a
 release input on the drive) is downloaded during the install. A missing
