@@ -93,15 +93,15 @@ static char log_text[12288];
 static size_t log_len;
 static FILE *log_files[2];
 
-#define OC_COLOR_BG       0x151a22
-#define OC_COLOR_CARD     0x1f2630
-#define OC_COLOR_TRACK    0x2d3644
-#define OC_COLOR_ACCENT   0x4fd1a5
-#define OC_COLOR_PRIMARY  0x3d8bfd
-#define OC_COLOR_DANGER   0xef5b5b
+#define OC_COLOR_BG       0x0f141b
+#define OC_COLOR_CARD     0x1a2230
+#define OC_COLOR_TRACK    0x2a3547
+#define OC_COLOR_ACCENT   0x36d399
+#define OC_COLOR_PRIMARY  0x4a9eff
+#define OC_COLOR_DANGER   0xf26d6d
 #define OC_COLOR_WARN     0xf2c14e
-#define OC_COLOR_MUTED    0x8894a3
-#define OC_COLOR_TEXT     0xe9edf2
+#define OC_COLOR_MUTED    0x7f8b9e
+#define OC_COLOR_TEXT     0xe8eef6
 #define OC_COLOR_LOGO     0xf5f2ec
 
 /* Steps shown in the breadcrumb depend on the branch taken: Tunnel
@@ -524,11 +524,12 @@ static lv_obj_t *make_button(lv_obj_t *parent, const char *text, const char *act
 {
     lv_obj_t *button = lv_btn_create(parent);
     lv_obj_set_size(button, w, h);
-    lv_obj_set_style_radius(button, 10, 0);
+    lv_obj_set_style_radius(button, 12, 0);
     lv_obj_set_style_bg_color(button,
         lv_color_hex(primary ? OC_COLOR_PRIMARY : OC_COLOR_CARD), 0);
-    lv_obj_set_style_border_width(button, primary ? 0 : 1, 0);
-    lv_obj_set_style_border_color(button, lv_color_hex(OC_COLOR_MUTED), 0);
+    lv_obj_set_style_border_width(button, 1, 0);
+    lv_obj_set_style_border_color(button,
+        lv_color_hex(primary ? OC_COLOR_PRIMARY : OC_COLOR_TRACK), 0);
     lv_obj_add_event_cb(button, action_button, LV_EVENT_CLICKED, (void *)action);
     lv_obj_t *label = lv_label_create(button);
     lv_label_set_text(label, text);
@@ -1501,6 +1502,7 @@ int main(int argc, char **argv)
     lv_obj_set_style_text_color(title_label, lv_color_white(), 0);
     lv_obj_set_style_text_font(title_label, &lv_font_montserrat_24, 0);
     lv_obj_align(title_label, LV_ALIGN_TOP_LEFT, 30, 54);
+    lv_obj_set_style_text_decor(title_label, LV_TEXT_DECOR_UNDERLINE, 0);
 
     body_label = lv_label_create(screen);
     lv_obj_set_width(body_label, width - 60);
@@ -1526,9 +1528,10 @@ int main(int argc, char **argv)
     lv_obj_set_size(summary_box, width - 60, 140);
     lv_obj_align(summary_box, LV_ALIGN_TOP_LEFT, 30, 160);
     lv_obj_set_style_bg_color(summary_box, lv_color_hex(OC_COLOR_CARD), 0);
-    lv_obj_set_style_border_width(summary_box, 0, 0);
-    lv_obj_set_style_radius(summary_box, 10, 0);
-    lv_obj_set_style_pad_all(summary_box, 14, 0);
+    lv_obj_set_style_border_width(summary_box, 1, 0);
+    lv_obj_set_style_border_color(summary_box, lv_color_hex(OC_COLOR_TRACK), 0);
+    lv_obj_set_style_radius(summary_box, 12, 0);
+    lv_obj_set_style_pad_all(summary_box, 16, 0);
     lv_obj_set_flex_flow(summary_box, LV_FLEX_FLOW_COLUMN);
     lv_obj_clear_flag(summary_box, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_scrollbar_mode(summary_box, LV_SCROLLBAR_MODE_OFF);
