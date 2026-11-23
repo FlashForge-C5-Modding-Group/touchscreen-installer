@@ -1520,12 +1520,12 @@ int main(int argc, char **argv)
     lv_obj_set_width(notice_label, width - 60);
     lv_label_set_long_mode(notice_label, LV_LABEL_LONG_WRAP);
     lv_obj_set_style_text_color(notice_label, lv_color_hex(OC_COLOR_WARN), 0);
-    lv_obj_align(notice_label, LV_ALIGN_TOP_LEFT, 30, 150);
+    lv_obj_align(notice_label, LV_ALIGN_TOP_LEFT, 30, 138);
     lv_obj_add_flag(notice_label, LV_OBJ_FLAG_HIDDEN);
 
     summary_box = lv_obj_create(screen);
     lv_obj_set_size(summary_box, width - 60, 140);
-    lv_obj_align(summary_box, LV_ALIGN_TOP_LEFT, 30, 160);
+    lv_obj_align(summary_box, LV_ALIGN_TOP_LEFT, 30, 168);
     lv_obj_set_style_bg_color(summary_box, lv_color_hex(OC_COLOR_CARD), 0);
     lv_obj_set_style_border_width(summary_box, 1, 0);
     lv_obj_set_style_border_color(summary_box, lv_color_hex(OC_COLOR_TRACK), 0);
