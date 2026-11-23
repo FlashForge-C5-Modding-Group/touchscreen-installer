@@ -1502,7 +1502,6 @@ int main(int argc, char **argv)
     lv_obj_set_style_text_color(title_label, lv_color_white(), 0);
     lv_obj_set_style_text_font(title_label, &lv_font_montserrat_24, 0);
     lv_obj_align(title_label, LV_ALIGN_TOP_LEFT, 30, 54);
-    lv_obj_set_style_text_decor(title_label, LV_TEXT_DECOR_UNDERLINE, 0);
 
     body_label = lv_label_create(screen);
     lv_obj_set_width(body_label, width - 60);
