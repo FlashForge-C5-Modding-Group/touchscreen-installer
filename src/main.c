@@ -1087,14 +1087,14 @@ static void show_page(enum page next)
         break;
     }
 
-    /* Buttons are 220 px wide; narrow them (labels wrap) when more than
-     * three share the row. */
+    /* Buttons share the row evenly (220 px max, never below 90 px). */
     uint32_t count = lv_obj_get_child_cnt(button_row);
     if (count > 0) {
         lv_obj_update_layout(button_row);
-        lv_coord_t w = (lv_obj_get_content_width(button_row) - (lv_coord_t)(count - 1) * 16) /
+        lv_coord_t w = (lv_obj_get_content_width(button_row) - (lv_coord_t)(count - 1) * 12) /
                        (lv_coord_t)count;
         if (w > 220) w = 220;
+        if (w < 90) w = 90;
         for (uint32_t i = 0; i < count; i++) {
             lv_obj_t *button = lv_obj_get_child(button_row, (int32_t)i);
             lv_obj_t *label = lv_obj_get_child(button, 0);
@@ -1548,12 +1548,13 @@ int main(int argc, char **argv)
     lv_obj_add_flag(progress_bar, LV_OBJ_FLAG_HIDDEN);
 
     button_row = lv_obj_create(screen);
-    lv_obj_set_size(button_row, width - 40, 90);
-    lv_obj_align(button_row, LV_ALIGN_BOTTOM_MID, 0, -20);
+    lv_obj_set_size(button_row, width - 40, 74);
+    lv_obj_align(button_row, LV_ALIGN_BOTTOM_MID, 0, -16);
     lv_obj_set_style_bg_opa(button_row, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(button_row, 0, 0);
     lv_obj_set_flex_flow(button_row, LV_FLEX_FLOW_ROW);
-    lv_obj_set_style_pad_column(button_row, 16, 0);
+    lv_obj_set_style_pad_column(button_row, 12, 0);
+    lv_obj_set_flex_align(button_row, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
     lv_obj_clear_flag(button_row, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_scrollbar_mode(button_row, LV_SCROLLBAR_MODE_OFF);
 
