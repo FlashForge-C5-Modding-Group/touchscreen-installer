@@ -14,7 +14,7 @@
 #include "logo.h"
 #include "platform.h"
 
-enum page { PAGE_CHECK, PAGE_MODE, PAGE_WEB, PAGE_TOUCHSCREEN, PAGE_READY,
+enum page { PAGE_WELCOME, PAGE_CHECK, PAGE_MODE, PAGE_WEB, PAGE_TOUCHSCREEN, PAGE_READY,
             PAGE_RUNNING, PAGE_DONE, PAGE_ERROR, PAGE_RESTORE, PAGE_KERNEL,
             PAGE_INSTALLED, PAGE_ROLLBACK, PAGE_UPDATE, PAGE_OFFLINE, PAGE_WIFI_PASS,
             PAGE_TUNNEL_WARN, PAGE_CLEANUP, PAGE_HELIX_WARN };
@@ -47,7 +47,7 @@ static char installer_version[32] = "?";
  * version above is the one-word id the install record compares. */
 static char release_name[64];
 static char mcu_drive[48] = "none", mcu_boards[48] = "none";
-static lv_obj_t *version_label;
+static lv_obj_t *version_label, *tips_label;
 static uint64_t running_since, splash_until;
 /* The running step (from install.sh's "Running NN-name.sh" and PROGRESS
  * lines), shown next to the Log button; run_secs is the finished run's time. */
@@ -93,15 +93,15 @@ static char log_text[12288];
 static size_t log_len;
 static FILE *log_files[2];
 
-#define OC_COLOR_BG       0x0f141b
-#define OC_COLOR_CARD     0x1a2230
-#define OC_COLOR_TRACK    0x2a3547
-#define OC_COLOR_ACCENT   0x36d399
-#define OC_COLOR_PRIMARY  0x4a9eff
-#define OC_COLOR_DANGER   0xf26d6d
+#define OC_COLOR_BG       0x11151c
+#define OC_COLOR_CARD     0x1c2430
+#define OC_COLOR_TRACK    0x2c3646
+#define OC_COLOR_ACCENT   0x38bdf8
+#define OC_COLOR_PRIMARY  0x3b82f6
+#define OC_COLOR_DANGER   0xef5350
 #define OC_COLOR_WARN     0xf2c14e
-#define OC_COLOR_MUTED    0x7f8b9e
-#define OC_COLOR_TEXT     0xe8eef6
+#define OC_COLOR_MUTED    0x8291a6
+#define OC_COLOR_TEXT     0xe6edf5
 #define OC_COLOR_LOGO     0xf5f2ec
 
 /* Steps shown in the breadcrumb depend on the branch taken: Tunnel
@@ -280,7 +280,10 @@ static void format_duration(char *buf, size_t size, unsigned secs);
 static void update_brand(void)
 {
     static char buf[64];
-    snprintf(buf, sizeof(buf), "OPENCREATOR  |  %s", model_name());
+    if (model_known)
+        snprintf(buf, sizeof(buf), "OPENCREATOR  |  %s", model_name());
+    else
+        snprintf(buf, sizeof(buf), "OPENCREATOR");
     lv_label_set_text(brand_label, buf);
 }
 
@@ -437,6 +440,7 @@ static void action_button(lv_event_t *event)
     const char *action = lv_event_get_user_data(event);
     if (strcmp(action, "quit") == 0) { quit_installer(); return; }
     if (strcmp(action, "splash-quit") == 0) { splash_quit = true; return; }
+    if (strcmp(action, "welcome-start") == 0) { show_page(PAGE_CHECK); start_action("check"); return; }
     if (strcmp(action, "soc") == 0) { mode = "soc"; show_page(PAGE_WEB); }
     else if (strcmp(action, "tunnel") == 0) {
         if (strcmp(prev_mode, "tunnel") == 0) {
@@ -470,6 +474,11 @@ static void action_button(lv_event_t *event)
 #ifdef OC_DEMO
     } else if (strcmp(action, "demo-install") == 0) {
         demo_root = OC_DEMO_INSTALL_ROOT; unsetenv("OC_SKIP_BACKUP"); start_action("install");
+    } else if (strcmp(action, "demo-tips") == 0) {
+        demo_root = OC_DEMO_INSTALL_ROOT;
+        current_action[0] = '\0';   /* no child action, so poll_child never advances */
+        child_pid = -1;
+        show_page(PAGE_RUNNING);
 #endif
     } else if (strcmp(action, "update") == 0 || strcmp(action, "update-nobackup") == 0) {
         /* Same setup as the install record, no questions asked. */
@@ -524,7 +533,7 @@ static lv_obj_t *make_button(lv_obj_t *parent, const char *text, const char *act
 {
     lv_obj_t *button = lv_btn_create(parent);
     lv_obj_set_size(button, w, h);
-    lv_obj_set_style_radius(button, 12, 0);
+    lv_obj_set_style_radius(button, 10, 0);
     lv_obj_set_style_bg_color(button,
         lv_color_hex(primary ? OC_COLOR_PRIMARY : OC_COLOR_CARD), 0);
     lv_obj_set_style_border_width(button, 1, 0);
@@ -554,7 +563,9 @@ static lv_obj_t *add_button(const char *text, const char *action)
                      strcmp(action, "update-nobackup") == 0 ||
                      strcmp(action, "update-home") == 0 || strcmp(action, "change-setup") == 0 ||
                      strcmp(action, "cleanup-confirm") == 0 || strcmp(action, "cleanup-back") == 0;
-    return make_button(button_row, text, action, !secondary, 220, 58);
+    lv_obj_t *b = make_button(button_row, text, action, !secondary, 220, 58);
+    lv_obj_fade_in(b, 160, 60);
+    return b;
 }
 
 /* Greyed out and not clickable. */
@@ -639,6 +650,93 @@ static void add_cleanup_button(void)
     add_button(LV_SYMBOL_TRASH "  Clean up storage", "cleanup-confirm");
 }
 
+/* Tips & tricks shown during the (long) install. */
+static const char *const install_tips[] = {
+    "Tip: the install is safe to leave alone. Just don't power off.",
+    "Tip: a wired network is more reliable than Wi-Fi for the download.",
+    "Tip: everything stock is backed up first -- you can roll back any time.",
+    "Tip: the live Log (top right) shows exactly which step is running.",
+    "Tip: Klipper, Moonraker and the web UI are installed one after another.",
+    "Tip: once done, open the printer's IP in your browser to reach the web UI.",
+    "Tip: the touchscreen UI starts automatically after the first reboot.",
+    "Tip: MCU firmware is flashed last -- that's normal, it takes a moment.",
+    "Tip: keep the printer powered and idle until you see the Done page.",
+    "Tip: you can rename your printer later in the web UI settings.",
+    "Tip: a good first print is a benchy.",
+    "Tip: keep your USB stick handy for backups.",
+    "Tip: you can use OrcaSlicer instead of FlashStudio.",
+    "Tip: set your filaments in AFC!",
+    "Fun fact: OpenCreator is real.",
+    "Tip: recalibrate offsets if you're first layer is bad, your nozzle might be bent.",
+    "Tip: check if your nozzle is bent if you get bad seperation",
+    "Fun fact: OpenCreator was started because someone got root.",
+    "Fun fact: Talk about OpenCreator, spread it to the world!",
+    "Tip: ever in doubt, calibrate.",
+    "Tip: if you have any issues, join the Discord.",
+    "Fun fact: Klipper runs the motion math on a separate MCU for precision.",
+    "Fun fact: this printer has 4 MCUs, and a fifth that could be used for AI detection...",
+    "Fun fact: you can download plugins like AI detection and Shake & Tune via the plugin marketplace.",
+    "Tip: you can reboot the printer via reboot command or host menu.",
+    "Fun fact: if you break your printer, it wont work.",
+    "Tip: don't watch, just leave and you'll come back to a ready printer for a reboot into CFW."
+    "Fun fact: CFW means custom firmware."
+
+};
+#define TIP_COUNT (sizeof(install_tips) / sizeof(install_tips[0]))
+
+/* Rare tips: each has a low chance of appearing. */
+static const char *const rare_tips[] = {
+    "Fun fact: OpenCreator is open source -- contributions welcome!",
+    "Rare tip: you found a rare tip! Lucky you.",
+    "Fun fact: MY DOG IS ON MY KEYBOARD PLS HASDFHASDFHUIO!111!!11",
+    "Fun fact: Sonic Mania and DOOM plays on this printer at 60 FPS.",
+    "Fun fact: deez nuts",
+    "Fun fact: this was developed in like 6+ months.",
+    "Fun fact: your princess is in another castle.",
+    "Rare tip: if you break a nozzle, support might give you a new one.",
+    "Fun fact: you're taking too long!",
+    "Fun tip: tip fact."
+};
+#define RARE_COUNT (sizeof(rare_tips) / sizeof(rare_tips[0]))
+
+static uint64_t tip_rng = 0x9e3779b97f4a7c15ULL;
+static unsigned tip_next_rand(void)
+{
+    tip_rng ^= tip_rng << 13; tip_rng ^= tip_rng >> 7; tip_rng ^= tip_rng << 17;
+    return (unsigned)(tip_rng >> 32);
+}
+
+static uint64_t tip_last_ms;
+
+/* Shuffle bag: every common tip shows once before any repeats. */
+static unsigned tip_bag[TIP_COUNT];
+static unsigned tip_bag_pos = TIP_COUNT;   /* empty -> refill on first use */
+
+static void tip_bag_shuffle(void)
+{
+    for (unsigned i = 0; i < TIP_COUNT; i++) tip_bag[i] = i;
+    for (unsigned i = TIP_COUNT; i > 1; i--) {
+        unsigned j = tip_next_rand() % i;
+        unsigned tmp = tip_bag[i - 1]; tip_bag[i - 1] = tip_bag[j]; tip_bag[j] = tmp;
+    }
+    tip_bag_pos = 0;
+}
+
+static void rotate_tip(void)
+{
+    if (!tips_label) return;
+    const char *text;
+    /* 1% chance of a rare tip, otherwise the next common tip from the shuffle bag. */
+    if (tip_next_rand() % 100 < 1) {
+        text = rare_tips[tip_next_rand() % RARE_COUNT];
+    } else {
+        if (tip_bag_pos >= TIP_COUNT) tip_bag_shuffle();
+        text = install_tips[tip_bag[tip_bag_pos++]];
+    }
+    lv_label_set_text(tips_label, text);
+    lv_obj_fade_in(tips_label, 300, 0);
+}
+
 static void show_page(enum page next)
 {
     page_now = next;
@@ -649,7 +747,10 @@ static void show_page(enum page next)
     lv_obj_add_flag(progress_bar, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(notice_label, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(splash_logo, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_add_flag(tips_label, LV_OBJ_FLAG_HIDDEN);
     lv_obj_clean(summary_box);
+    if (next == PAGE_WELCOME) lv_obj_add_flag(version_label, LV_OBJ_FLAG_HIDDEN);
+    else lv_obj_clear_flag(version_label, LV_OBJ_FLAG_HIDDEN);
 
     int step, total;
     step_info(next, &step, &total);
@@ -666,8 +767,11 @@ static void show_page(enum page next)
                  next == PAGE_DONE ? "Finished in" : "Stopped after", took);
     }
     lv_label_set_text(step_label, step_buf);
+    /* Fade the new page's title and body in on every transition. */
+    lv_obj_fade_in(title_label, 120, 0);
+    lv_obj_fade_in(body_label, 160, 30);
     /* Quit only on the start pages, never during or after an install. */
-    bool start_page = next == PAGE_MODE || next == PAGE_INSTALLED || next == PAGE_UPDATE ||
+    bool start_page = next == PAGE_WELCOME || next == PAGE_MODE || next == PAGE_INSTALLED || next == PAGE_UPDATE ||
                       next == PAGE_KERNEL || next == PAGE_OFFLINE || next == PAGE_WIFI_PASS;
     lv_obj_add_flag(wifi_list, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(wifi_ta, LV_OBJ_FLAG_HIDDEN);
@@ -691,6 +795,18 @@ static void show_page(enum page next)
     bool cleaning = strcmp(current_action, "cleanup") == 0;
 
     switch (next) {
+    case PAGE_WELCOME:
+        set_title(next, "Welcome to OpenCreator");
+        lv_label_set_text(body_label,
+            "A fresh Klipper experience for your Creator 5.\n\n"
+            "Sets up Kalico, a web interface, and a touchscreen UI. "
+            "Everything is backed up first.\n\n"
+            "Also usable as a recovery environment.\n\n"
+            "Tap Get started to check your printer and begin.");
+        lv_obj_clear_flag(splash_logo, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_fade_in(splash_logo, 500, 150);
+        add_button("Get started", "welcome-start");
+        break;
     case PAGE_CHECK:
         set_title(next, "OpenCreator installer");
         lv_label_set_text(body_label, "Checking the printer...");
@@ -940,6 +1056,7 @@ static void show_page(enum page next)
         add_button("Back", "back");
 #ifdef OC_DEMO
         add_button("Demo install", "demo-install");
+        add_button("Demo tips", "demo-tips");
 #endif
         /* A new install (no previous OpenCreator) needs 2 GB free. */
         if (space_low && !prev_version[0]) {
@@ -1023,6 +1140,21 @@ static void show_page(enum page next)
               "Follow the live status below and do not power off.");
         lv_obj_clear_flag(spinner, LV_OBJ_FLAG_HIDDEN);
         lv_obj_clear_flag(progress_bar, LV_OBJ_FLAG_HIDDEN);
+        tip_last_ms = now_ms();
+        tip_rng ^= (uint64_t)now_ms() * 2654435761u;  /* seed from clock */
+        rotate_tip();
+        lv_obj_clear_flag(tips_label, LV_OBJ_FLAG_HIDDEN);
+        if (demo_root) {
+            /* Demo: show ONLY the tips, big and centered, nothing else. */
+            lv_obj_set_style_text_font(tips_label, &lv_font_montserrat_24, 0);
+            lv_obj_align(tips_label, LV_ALIGN_CENTER, 0, 0);
+            lv_obj_add_flag(progress_bar, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_add_flag(spinner, LV_OBJ_FLAG_HIDDEN);
+            lv_label_set_text(title_label, "");
+            lv_label_set_text(body_label, "");
+            lv_label_set_text(step_label, "");
+        }
+        lv_obj_fade_in(tips_label, 300, 0);
         break;
     case PAGE_DONE:
         if (cleaning) {
@@ -1513,14 +1645,22 @@ int main(int argc, char **argv)
     lv_img_set_src(splash_logo, &oc_logo_large);
     lv_obj_set_style_img_recolor(splash_logo, lv_color_hex(OC_COLOR_LOGO), 0);
     lv_obj_set_style_img_recolor_opa(splash_logo, LV_OPA_COVER, 0);
-    lv_obj_align(splash_logo, LV_ALIGN_CENTER, 0, 14);
+    lv_obj_align(splash_logo, LV_ALIGN_CENTER, 0, 90);
     lv_obj_add_flag(splash_logo, LV_OBJ_FLAG_HIDDEN);
 
     notice_label = lv_label_create(screen);
     lv_obj_set_width(notice_label, width - 60);
     lv_label_set_long_mode(notice_label, LV_LABEL_LONG_WRAP);
     lv_obj_set_style_text_color(notice_label, lv_color_hex(OC_COLOR_WARN), 0);
-    lv_obj_align(notice_label, LV_ALIGN_TOP_LEFT, 30, 138);
+    lv_obj_align(notice_label, LV_ALIGN_TOP_LEFT, 30, 312);
+
+    tips_label = lv_label_create(screen);
+    lv_obj_set_width(tips_label, width - 60);
+    lv_label_set_long_mode(tips_label, LV_LABEL_LONG_WRAP);
+    lv_obj_set_style_text_color(tips_label, lv_color_hex(OC_COLOR_ACCENT), 0);
+    lv_obj_set_style_text_align(tips_label, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_align(tips_label, LV_ALIGN_TOP_LEFT, 30, 210);
+    lv_obj_add_flag(tips_label, LV_OBJ_FLAG_HIDDEN);
     lv_obj_add_flag(notice_label, LV_OBJ_FLAG_HIDDEN);
 
     summary_box = lv_obj_create(screen);
@@ -1529,7 +1669,7 @@ int main(int argc, char **argv)
     lv_obj_set_style_bg_color(summary_box, lv_color_hex(OC_COLOR_CARD), 0);
     lv_obj_set_style_border_width(summary_box, 1, 0);
     lv_obj_set_style_border_color(summary_box, lv_color_hex(OC_COLOR_TRACK), 0);
-    lv_obj_set_style_radius(summary_box, 12, 0);
+    lv_obj_set_style_radius(summary_box, 14, 0);
     lv_obj_set_style_pad_all(summary_box, 16, 0);
     lv_obj_set_flex_flow(summary_box, LV_FLEX_FLOW_COLUMN);
     lv_obj_clear_flag(summary_box, LV_OBJ_FLAG_SCROLLABLE);
@@ -1571,6 +1711,7 @@ int main(int argc, char **argv)
     lv_obj_set_style_text_align(version_label, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_style_text_color(version_label, lv_color_hex(OC_COLOR_MUTED), 0);
     lv_obj_align(version_label, LV_ALIGN_BOTTOM_MID, 0, -4);
+    lv_obj_add_flag(version_label, LV_OBJ_FLAG_HIDDEN);  // shown once setup begins
     update_version();
 
     /* No-internet page: nearby networks, then a password with a keyboard. */
@@ -1604,16 +1745,23 @@ int main(int argc, char **argv)
 
     build_log_panel(screen, width, height);
 
-    set_status("Preparing...");
-    show_page(PAGE_CHECK);
-    start_action("check");
+    set_status("");
+    show_page(PAGE_WELCOME);
+    // The check runs only after the user taps Get started, so the welcome
+    // page stays up instead of racing past on a fast printer.
     uint64_t last = now_ms();
     for (;;) {
         uint64_t now = now_ms();
         lv_tick_inc((uint32_t)(now - last));
         last = now;
         poll_child();
-        if (page_now == PAGE_RUNNING) update_elapsed();
+        if (page_now == PAGE_RUNNING) {
+            update_elapsed();
+            if (now_ms() - tip_last_ms > 8000) {
+                tip_last_ms = now_ms();
+                rotate_tip();
+            }
+        }
         lv_timer_handler();
         struct timespec nap = { .tv_sec = 0, .tv_nsec = 20000000 };
         nanosleep(&nap, NULL);
