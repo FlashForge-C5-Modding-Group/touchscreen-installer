@@ -678,8 +678,8 @@ static const char *const install_tips[] = {
     "Fun fact: you can download plugins like AI detection and Shake & Tune via the plugin marketplace.",
     "Tip: you can reboot the printer via reboot command or host menu.",
     "Fun fact: if you break your printer, it wont work.",
-    "Tip: don't watch, just leave and you'll come back to a ready printer for a reboot into CFW."
-    "Fun fact: CFW means custom firmware."
+    "Tip: don't watch, just leave and you'll come back to a ready printer for a reboot into CFW.",
+    "Fun fact: CFW means custom firmware.",
 
 };
 #define TIP_COUNT (sizeof(install_tips) / sizeof(install_tips[0]))
