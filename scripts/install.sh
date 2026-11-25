@@ -32,8 +32,8 @@ if [ -z "$DEMO_ROOT" ]; then
 fi
 STATE_DIR=${OC_STATE_DIR:-"$DEMO_ROOT/usr/data/opencreator"}
 INSTALL_STATE=$STATE_DIR/install.json
-INSTALLER_VERSION=0.0.7.7
-INSTALLER_RELEASE="Public Alpha 7.6"
+INSTALLER_VERSION=0.0.7.8
+INSTALLER_RELEASE="Public Alpha 7.7"
 MIN_FREE_KB=${OC_MIN_FREE_KB:-262144}
 BACKUP_FOLDERS="usr/prog/PROGRAM/software/firmwareExe usr/prog/moonraker usr/data/opencreator
 usr/data/mainsail usr/data/fluidd usr/data/nginx usr/prog/c5-tunnel-socat
@@ -452,7 +452,7 @@ install_payload() {
     UPDATE=0
     [ ! -f "$INSTALL_STATE" ] || UPDATE=1
     missing_tools=
-    for tool in tar gzip gunzip md5sum sed grep awk find mktemp wget od dd; do
+    for tool in tar gzip gunzip md5sum sed grep awk find mktemp wget dd; do
         command -v "$tool" >/dev/null 2>&1 || missing_tools="$missing_tools $tool"
     done
     [ -z "$missing_tools" ] || die "the printer is missing:$missing_tools; nothing was changed"
@@ -823,7 +823,9 @@ stock_reset() {
     fi
     [ "$(dd if="$WORK/firmwareExe" bs=1 skip=1 count=3 2>/dev/null)" = ELF ] ||
         die "downloaded firmwareExe is not ELF; nothing was changed"
-    [ "$(od -An -tx1 -N3 "$STOCK_LOGO" 2>/dev/null | tr -d ' ')" = ffd8ff ] ||
+    # JPEG starts FF D8 FF. Compared with dd, not od: the printer's BusyBox od
+    # has no -A/-t/-N, so an od check failed for every logo.
+    [ "$(dd if="$STOCK_LOGO" bs=1 count=3 2>/dev/null)" = "$(printf '\377\330\377')" ] ||
         die "the installer has no stock boot logo; nothing was changed"
     cp "$STOCK_LOGO" "$WORK/logo.jpeg" || die "could not copy the stock boot logo; nothing was changed"
     progress 2 5
