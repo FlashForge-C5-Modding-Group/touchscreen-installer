@@ -40,6 +40,7 @@ for part in startup firmware tunneled moonraker fluidd plugin-manager mcu-flash;
 done
 cp "$FS/opencreator/version.txt" "$OCDIR/version.txt"
 chmod 755 "$OCDIR/startup/startup.sh" "$OCDIR"/startup/scripts/*.sh "$OCDIR/firmware/firmwareExe"
+[ ! -f "$OCDIR/firmware/driver.sh" ] || chmod 755 "$OCDIR/firmware/driver.sh"
 [ ! -f "$OCDIR/plugin-manager/oc-plugin" ] || chmod 755 "$OCDIR/plugin-manager/oc-plugin"
 [ ! -f "$OCDIR/mcu-flash/oc-mcu-flash" ] || chmod 755 "$OCDIR/mcu-flash/oc-mcu-flash"
 chmod 644 "$OCDIR/tunneled/tunneled.sh"

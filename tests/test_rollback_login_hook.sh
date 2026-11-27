@@ -1,5 +1,6 @@
 #!/bin/sh
-# A rollback to stock removes OpenCreator's login banner hook from /etc.
+# A rollback to stock removes OpenCreator's login banner hook from /etc and its
+# early boot hook from /usr/prog/module, nothing else.
 set -eu
 
 REPO_ROOT=$(cd "$(dirname "$0")/.." && pwd)
@@ -20,6 +21,9 @@ printf '{}\n' > "$root/usr/data/opencreator/install.json"
 printf '# profile\n' > "$root/usr/data/opencreator/startup/login/profile.sh"
 ln -s /usr/data/opencreator/startup/login/profile.sh "$root/etc/profile.d/opencreator.sh"
 printf 'umask 022\n' > "$root/etc/profile.d/umask.sh"
+mkdir -p "$root/usr/prog/module"
+printf '#!/bin/sh\n# runs runRecovery.sh\n' > "$root/usr/prog/module/driver.sh"
+printf 'lcd\n' > "$root/usr/prog/module/lcd.sh"
 
 OC_DEMO_ROOT=$root OC_STATE_DIR=$root/usr/data/opencreator \
     /bin/sh "$REPO_ROOT/scripts/install.sh" rollback "$REPO_ROOT/payload-template" \
@@ -30,6 +34,17 @@ OC_DEMO_ROOT=$root OC_STATE_DIR=$root/usr/data/opencreator \
 [ ! -e "$root/etc/profile.d/opencreator.sh" ] && [ ! -L "$root/etc/profile.d/opencreator.sh" ] ||
     fail "login hook still in /etc/profile.d"
 [ -f "$root/etc/profile.d/umask.sh" ] || fail "other profile.d files were touched"
+[ ! -e "$root/usr/prog/module/driver.sh" ] || fail "early boot hook still in /usr/prog/module"
+[ -f "$root/usr/prog/module/lcd.sh" ] || fail "FlashForge's module files were touched"
+
+# Someone else's driver.sh is not ours to remove.
+printf '#!/bin/sh\nvendor\n' > "$root/usr/prog/module/driver.sh"
+mv "$root/usr/data/opencreator/install.json.rolled-back" "$root/usr/data/opencreator/install.json"
+printf '#!/bin/sh\nexit 0\n' > "$root/usr/prog/PROGRAM/software/firmwareExe"
+OC_DEMO_ROOT=$root OC_STATE_DIR=$root/usr/data/opencreator \
+    /bin/sh "$REPO_ROOT/scripts/install.sh" rollback "$REPO_ROOT/payload-template" \
+    "$TEST_DIR/backup" soc fluidd yes > "$TEST_DIR/out" 2>&1 || { cat "$TEST_DIR/out" >&2; fail "second rollback failed"; }
+[ -f "$root/usr/prog/module/driver.sh" ] || fail "a driver.sh that isn't OpenCreator's was removed"
 [ -f "$root/usr/data/opencreator/install.json.rolled-back" ] || fail "install record not moved"
 
 printf 'test_rollback_login_hook passed\n'

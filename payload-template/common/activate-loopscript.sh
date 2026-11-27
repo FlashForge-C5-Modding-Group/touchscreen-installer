@@ -5,6 +5,7 @@ set -eu
 DEMO_ROOT=${OC_DEMO_ROOT:-}
 OCDIR=$DEMO_ROOT/usr/data/opencreator
 FIRMWARE_EXE=$DEMO_ROOT/usr/prog/PROGRAM/software/firmwareExe
+EARLY_HOOK=$DEMO_ROOT/usr/prog/module/driver.sh
 LOGO=$DEMO_ROOT/usr/prog/logo.jpeg
 : "${OC_PAYLOAD:?}"
 
@@ -119,6 +120,14 @@ cp "$OCDIR/firmware/firmwareExe" "$FIRMWARE_EXE.new"
 chmod 755 "$FIRMWARE_EXE.new"
 mv "$FIRMWARE_EXE.new" "$FIRMWARE_EXE"
 sync
+if [ -f "$OCDIR/firmware/driver.sh" ]; then
+    echo "STAGE Installing the early boot hook"
+    mkdir -p "$(dirname "$EARLY_HOOK")"
+    cp "$OCDIR/firmware/driver.sh" "$EARLY_HOOK.new"
+    chmod 755 "$EARLY_HOOK.new"
+    mv "$EARLY_HOOK.new" "$EARLY_HOOK"
+    sync
+fi
 echo "STAGE LoopScript active"
 
 # Recover with the current launcher selected if a later operation lost startup.

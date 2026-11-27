@@ -73,7 +73,9 @@ Both modes start with:
    `firmwareExe` replaces `/usr/prog/PROGRAM/software/firmwareExe` (the stock
    binary is kept once as `/usr/data/opencreator/firmwareExe.stock`), with its
    `startup/`, `tunneled/` and `moonraker/` folders in `/usr/data/opencreator`,
-   the nginx snippets in `/usr/data/nginx/conf.d`, and the OpenCreator boot logo
+   the nginx snippets in `/usr/data/nginx/conf.d`, the early boot hook
+   (`firmware/driver.sh` at `/usr/prog/module/driver.sh`, which stock's S11 runs
+   at every boot), and the OpenCreator boot logo
    (`payload/common/logo.jpeg`, made by `scripts/gen-boot-logo.py`) at
    `/usr/prog/logo.jpeg`, the file `/etc/init.d/S10jpeg_display_shell` shows at
    boot. Like FlashForge's, it is 480x800: the landscape logo turned a quarter
@@ -241,7 +243,8 @@ the detected package; demo installs default to 2.0.7. In the SDL demo,
   `app_startup.sh` flashes the boards at the next boot. OpenCreator's pending
   MCU flash and firmware marker are removed. Quick rollback, when a stock
   `firmwareExe` copy is on the printer, only puts that back and leaves the MCU
-  firmware alone.
+  firmware alone. Both remove the early boot hook (`/usr/prog/module/driver.sh`),
+  but only when it's OpenCreator's.
 - **Stock timelapse frames**: the backup includes
   `/usr/data/firmwareRes/camera/jpeg`, where the stock firmware keeps its
   timelapse frames. It can be large, so it's archived without gzip (JPEGs
@@ -317,7 +320,7 @@ payload/
   common/enable-root.sh            # root login opencreator / FlashForge2026 (both modes)
   common/enable-sftp.sh            # SFTP on the SSH login (both modes)
   common/import-stock-calibration.sh  # FlashForge's calibration into a first install (SoC)
-  common/activate-loopscript.sh    # last step: Legacy LoopScript off, firmwareExe, boot logo
+  common/activate-loopscript.sh    # last step: Legacy LoopScript off, firmwareExe, early boot hook, boot logo
   soc/install-stack.sh             # Kalico and printer config
   soc/install-moonraker.sh         # Moonraker
   soc/install-web.sh               # Mainsail, Fluidd and the nginx web root

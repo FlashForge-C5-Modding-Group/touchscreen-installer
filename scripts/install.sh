@@ -734,6 +734,12 @@ stock_firmware_exe() {
 remove_login_hook() {
     rm -f "$DEMO_ROOT/etc/profile.d/opencreator.sh"
 }
+# The early boot hook stock runs at S11 (opencreator-fs firmware/driver.sh);
+# FlashForge never ships one, but only ours is removed.
+remove_early_hook() {
+    hook=$DEMO_ROOT/usr/prog/module/driver.sh
+    ! grep -q runRecovery.sh "$hook" 2>/dev/null || rm -f "$hook"
+}
 rollback_stock() {
     [ -n "$DEMO_ROOT" ] || [ "$(id -u)" -eq 0 ] || die "rollback requires root"
     FE=$DEMO_ROOT/usr/prog/PROGRAM/software/firmwareExe
@@ -749,6 +755,7 @@ rollback_stock() {
     # Without the record the next installer run offers a fresh install.
     [ ! -f "$INSTALL_STATE" ] || mv "$INSTALL_STATE" "$INSTALL_STATE.rolled-back"
     remove_login_hook
+    remove_early_hook
     sync
     progress 2 2
     stage "Rolled back to stock; reboot to start FlashForge's firmware"
@@ -854,6 +861,7 @@ stock_reset() {
     progress 4 5
     [ ! -f "$INSTALL_STATE" ] || mv "$INSTALL_STATE" "$INSTALL_STATE.rolled-back"
     remove_login_hook
+    remove_early_hook
     rm -rf "$WORK"
     sync
     progress 5 5

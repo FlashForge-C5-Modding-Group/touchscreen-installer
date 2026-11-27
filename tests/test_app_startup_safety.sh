@@ -18,8 +18,10 @@ cp "$REPO_ROOT/payload-template/common/logo.jpeg" "$FIXTURE_PAYLOAD/common/logo.
 cp "$REPO_ROOT/payload-template/common/recover-app-startup.sh" "$FIXTURE_PAYLOAD/common/"
 OC_TEST_ACTIVATION=$REPO_ROOT/payload-template/common/activate-loopscript.sh
 OC_TEST_LAUNCHER=$TEST_DIR/firmwareExe.launcher
-export OC_TEST_ACTIVATION OC_TEST_LAUNCHER
+OC_TEST_HOOK=$TEST_DIR/driver.sh
+export OC_TEST_ACTIVATION OC_TEST_LAUNCHER OC_TEST_HOOK
 printf '#!/bin/sh\nexit 0\n' > "$OC_TEST_LAUNCHER"
+printf '#!/bin/sh\n# runRecovery.sh hook fixture\n' > "$OC_TEST_HOOK"
 cat <<'EOF' > "$FIXTURE_PAYLOAD/installers/soc/99-activate.sh"
 #!/bin/sh
 set -eu
@@ -27,6 +29,7 @@ set -eu
 [ -f "$OC_DEMO_ROOT/usr/prog/app_startup.sh" ]
 mkdir -p "$OC_DEMO_ROOT/usr/data/opencreator/firmware"
 cp "$OC_TEST_LAUNCHER" "$OC_DEMO_ROOT/usr/data/opencreator/firmware/firmwareExe"
+cp "$OC_TEST_HOOK" "$OC_DEMO_ROOT/usr/data/opencreator/firmware/driver.sh"
 exec /bin/sh "$OC_TEST_ACTIVATION"
 EOF
 
@@ -250,6 +253,9 @@ test_install_backup_restore_round_trip() {
         fail "install changed the original legacy startup backup"
     cmp -s "$OC_TEST_LAUNCHER" "$root/usr/prog/PROGRAM/software/firmwareExe" ||
         fail "activation did not install the launcher"
+    cmp -s "$OC_TEST_HOOK" "$root/usr/prog/module/driver.sh" ||
+        fail "activation did not install the early boot hook"
+    [ -x "$root/usr/prog/module/driver.sh" ] || fail "early boot hook is not executable"
     set -- "$root"/backup/opencreator-*
     [ "$#" -eq 1 ] && [ -d "$1" ] || fail "install did not create exactly one backup"
     backup=$1
