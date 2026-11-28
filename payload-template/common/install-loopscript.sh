@@ -38,7 +38,6 @@ for part in startup firmware tunneled moonraker fluidd plugin-manager mcu-flash;
     [ -d "$FS/opencreator/$part" ] || continue
     oc_overlay "$FS/opencreator/$part" "$OCDIR/$part" "$OCDIR/.installed/$part.md5"
 done
-cp "$FS/opencreator/version.txt" "$OCDIR/version.txt"
 chmod 755 "$OCDIR/startup/startup.sh" "$OCDIR"/startup/scripts/*.sh "$OCDIR/firmware/firmwareExe"
 [ ! -f "$OCDIR/firmware/driver.sh" ] || chmod 755 "$OCDIR/firmware/driver.sh"
 [ ! -f "$OCDIR/plugin-manager/oc-plugin" ] || chmod 755 "$OCDIR/plugin-manager/oc-plugin"
